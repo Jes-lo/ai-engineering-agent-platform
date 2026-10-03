@@ -17,6 +17,10 @@ from ai_engineering_agent_platform.services.indexing_mapping import (
     build_embedding_request,
     build_vector_upsert_request,
 )
+from ai_engineering_agent_platform.services.rag import (
+    RAGResult,
+    RAGService,
+)
 from ai_engineering_agent_platform.services.reranking import (
     RerankingService,
 )
@@ -38,6 +42,8 @@ __all__ = [
     "GroundedGenerationService",
     "IndexingResult",
     "IndexingService",
+    "RAGResult",
+    "RAGService",
     "RerankingService",
     "RetrievalService",
     "build_embedding_request",

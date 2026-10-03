@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.6
+Version: 0.7
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -481,8 +481,40 @@ must enforce user or tenant authorization before retrieved evidence becomes
 model context.
 
 Presentation-layer citation rendering, automated groundedness/citation-quality
-evaluation, complete retrieval-to-generation orchestration, and stronger prompt
-injection defenses remain future work.
+evaluation, and stronger prompt injection defenses remain future work.
+
+## Current End-to-End RAG Orchestration Security Posture
+
+End-to-end retrieval-to-generation composition is now an active application
+surface through `RAGService`.
+
+Current controls include:
+
+- deterministic stage ordering from retrieval to optional reranking to grounded
+  generation;
+- empty retrieval produces an explicit abstention before reranker or LLM
+  execution;
+- reranking remains optional and uses only the already validated retrieval
+  candidates;
+- the original retrieval result is retained separately from the exact grounding
+  input used for model generation;
+- citation provenance remains bound to platform-owned retrieved evidence rather
+  than model-authored source identifiers;
+- existing retrieval, reranking, and grounded-generation validation remains
+  authoritative at each stage;
+- provider and domain failures propagate without being converted into a
+  successful RAG response;
+- the orchestration layer does not implement automatic retries that could hide
+  stage failures or duplicate provider operations.
+
+`RAGService` itself introduces no new model-provider, database, tool, workflow,
+MCP, or observability backend. It composes existing application services and
+therefore inherits their existing trust boundaries.
+
+This orchestration does not provide authentication, tenant authorization,
+row-level tenant isolation, semantic entailment verification, prompt-injection
+elimination, context token budgeting, presentation-layer citation rendering,
+automatic retries, workflow execution, or AI observability.
 
 ## Current Limitations
 
@@ -527,6 +559,12 @@ persistence foundation:
   output;
 - empty retrieval results bypass reranking without invoking a reranker.
 
+Feature 8 composes the retrieval, optional reranking, and grounded-generation
+services into one end-to-end RAG execution path. Empty retrieval short-circuits
+to an explicit abstention before reranking or LLM generation. Non-empty
+retrieval preserves the original evidence while the exact retrieval or
+reranked result used for grounding is retained separately.
+
 Retrieved content remains untrusted data. Retrieval evidence must not be
 interpreted as trusted model instruction merely because it passed vector
 similarity, provenance reconstruction, or reranking.
@@ -539,7 +577,6 @@ The current retrieval foundation does not yet implement:
 - a concrete reranker adapter or reranker runtime;
 - presentation-layer citation rendering;
 - semantic groundedness or entailment verification;
-- complete RAG orchestration;
 - per-user or per-tenant retrieval authorization;
 - row-level tenant isolation;
 - data-retention or deletion-policy orchestration;
@@ -552,11 +589,12 @@ The current retrieval foundation does not yet implement:
 - MCP integration;
 - workflow runtime.
 
-Retrieval, provider-neutral reranking, and grounded generation are therefore
-active application surfaces rather than purely anticipatory surfaces. Knowledge-source ingestion,
-public retrieval exposure, tenant authorization, agents,
-MCP, workflows, and AI observability remain partially or wholly anticipatory
-and require additional executable controls when introduced.
+Retrieval, provider-neutral reranking, grounded generation, and end-to-end RAG
+orchestration are therefore active application surfaces rather than purely
+anticipatory surfaces. Knowledge-source ingestion, public retrieval exposure,
+tenant authorization, agents, MCP, workflows, and AI observability remain
+partially or wholly anticipatory and require additional executable controls
+when introduced.
 
 Each future feature must update this threat model when it materially
 changes:

@@ -63,6 +63,12 @@ The repository currently includes:
 - canonical `C1`, `C2`, ... citation identifiers resolved only to evidence
   already present in the supplied retrieval result;
 - explicit `INSUFFICIENT_EVIDENCE` abstention without fabricated provenance;
+- provider-neutral end-to-end RAG orchestration through `RAGService`;
+- deterministic retrieval -> optional reranking -> grounded-generation stage
+  ordering;
+- controlled no-evidence abstention without reranker or LLM execution;
+- preservation of the original retrieval result and the exact grounding input
+  used for generation through `RAGResult`;
 - automated architectural dependency checks;
 - CI/CD and software supply-chain validation, including a dedicated
   PostgreSQL integration job.
@@ -76,17 +82,25 @@ Tool calling remains intentionally unsupported by the LLM contract. Non-empty
 provider `tool_calls` are rejected rather than executed or silently
 discarded.
 
-Persistent vector storage is now complemented by provider-neutral retrieval
-and grounded-generation foundations. Deterministic chunking, indexing,
-semantic retrieval, validated evidence reconstruction, optional reranking,
-deterministic context assembly, grounded model generation, explicit abstention,
-and citation-to-evidence resolution are implemented and covered by tests.
+Persistent vector storage is now complemented by provider-neutral retrieval,
+grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
+indexing, semantic retrieval, validated evidence reconstruction, optional
+reranking, deterministic context assembly, grounded model generation, explicit
+abstention, citation-to-evidence resolution, and retrieval-to-generation
+composition are implemented and covered by tests.
 
 `GroundedGenerationService` consumes an already validated `RetrievalResponse`
 or `RerankedRetrievalResponse`; it does not own retrieval execution. Model
 citation markers such as `[[C1]]` are resolved by the platform back to the
 retrieved evidence object, so the model does not author source references,
 document identifiers, offsets, or other provenance metadata.
+
+`RAGService` composes `RetrievalService`, optional `RerankingService`, and
+`GroundedGenerationService` without moving provider ownership into the
+orchestration layer. Empty retrieval is handled as a controlled abstention
+before reranking or LLM execution. `RAGResult` preserves both the original
+retrieval output and the exact retrieval or reranked evidence supplied to
+grounded generation.
 
 This establishes citation integrity and provenance binding, not automatic
 semantic entailment or factual verification of every generated claim.
@@ -95,9 +109,9 @@ injection content.
 
 The repository still does not implement knowledge-source ingestion, a public
 retrieval API, a concrete reranker adapter, tenant-aware retrieval
-authorization, complete end-to-end RAG orchestration, presentation-layer
-citation rendering, semantic groundedness evaluation, executable tools,
-agents, MCP integrations, workflow execution, or AI observability backends.
+authorization, presentation-layer citation rendering, semantic groundedness
+evaluation, executable tools, agents, MCP integrations, workflow execution, or
+AI observability backends.
 
 ## Planned Capabilities
 
@@ -110,8 +124,6 @@ including:
 - knowledge-source ingestion and parsing;
 - public retrieval API exposure;
 - concrete local or remote reranker adapters;
-- complete RAG orchestration across retrieval, optional reranking, and
-  grounded generation;
 - production database hardening, backup/recovery, and availability patterns;
 - tenant-aware retrieval authorization and data lifecycle controls;
 - presentation-layer citation rendering and automated semantic
