@@ -8,9 +8,12 @@ from ai_engineering_agent_platform.adapters.ollama.tool_mapping import (
 )
 from ai_engineering_agent_platform.contracts import (
     FinishReason,
+    LLMAssistantToolCallMessage,
+    LLMConversationMessage,
     LLMMessage,
     LLMRequest,
     LLMResponse,
+    LLMToolResultMessage,
     MessageRole,
     TokenUsage,
     ToolDefinition,
@@ -20,16 +23,69 @@ from ai_engineering_agent_platform.domain import ProviderExecutionError
 type JsonObject = dict[str, object]
 
 
+def _map_ollama_message(
+    message: LLMConversationMessage,
+) -> JsonObject:
+    """Map one validated platform conversation entry into Ollama JSON."""
+    if isinstance(
+        message,
+        LLMAssistantToolCallMessage,
+    ):
+        tool_calls: list[JsonObject] = []
+
+        for proposal in message.tool_calls:
+            function: JsonObject = {
+                "name": proposal.tool_name,
+                "arguments": {
+                    argument.name: argument.value for argument in proposal.arguments
+                },
+            }
+
+            mapped_call: JsonObject = {
+                "function": function,
+            }
+
+            if proposal.provider_call_id is not None:
+                mapped_call["id"] = proposal.provider_call_id
+
+            tool_calls.append(mapped_call)
+
+        return {
+            "role": MessageRole.ASSISTANT.value,
+            "content": message.content,
+            "tool_calls": tool_calls,
+        }
+
+    if isinstance(
+        message,
+        LLMToolResultMessage,
+    ):
+        # Platform call_id intentionally stays inside the platform transcript.
+        # Ollama receives the provider-facing tool name and normalized content.
+        return {
+            "role": MessageRole.TOOL.value,
+            "content": message.result.content,
+            "tool_name": message.result.tool_name,
+        }
+
+    if isinstance(
+        message,
+        LLMMessage,
+    ):
+        return {
+            "role": message.role.value,
+            "content": message.content,
+        }
+
+    raise TypeError("unsupported LLM conversation message")
+
+
 def build_ollama_chat_payload(
     request: LLMRequest,
 ) -> JsonObject:
     """Build a non-streaming Ollama chat request from a platform request."""
     messages: list[JsonObject] = [
-        {
-            "role": message.role.value,
-            "content": message.content,
-        }
-        for message in request.messages
+        _map_ollama_message(message) for message in request.messages
     ]
 
     payload: JsonObject = {

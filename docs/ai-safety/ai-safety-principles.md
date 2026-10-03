@@ -60,29 +60,48 @@ control.
 
 ## 6. Agent Execution Is Bounded
 
-The current controlled agent-turn boundary enforces a finite proposal budget.
-Each `AgentTurnRequest` has a positive `max_steps`, and the platform applies
-the absolute ceiling `MAX_AGENT_TURN_STEPS = 8`.
+The platform now applies bounds at both the controlled single-turn layer and
+the conversational loop layer.
+
+Each `AgentTurnRequest` has a positive `max_steps`, with the absolute
+single-turn ceiling `MAX_AGENT_TURN_STEPS = 8`.
+
+`BoundedAgentLoopService` additionally enforces two global ceilings across the
+complete conversation:
+
+- `MAX_AGENT_LOOP_MODEL_TURNS = 8`;
+- `MAX_AGENT_LOOP_TOOL_CALLS = 8`.
+
+The tool-call budget is cumulative across model turns rather than reset for
+each generation. Once the tool budget is exhausted, tools are removed from the
+next controlled model turn. A model proposal that exceeds the remaining
+budget fails before provider execution.
 
 Bounded execution also requires capability control rather than prompt wording.
-Only registered, enabled, explicitly authorized tools may be exposed to the
-model. Model proposals remain untrusted until the platform creates a fresh
-controlled invocation identity and the complete planned batch passes
-side-effect-free preflight.
+Every executable proposal continues through `ControlledAgentService`, so only
+registered, enabled, explicitly authorized tools may become model-visible and
+every execution retains the existing fresh-identity, preflight, approval, and
+result-validation controls.
 
-Approval-required plans pause before any provider execution. Resumption uses
-the exact service-issued plan without regenerating the model decision. The
-current replay protection and pending state are process-local and in-memory;
+Tool results returned to the LLM are untrusted context. Typed
+`LLMAssistantToolCallMessage` and `LLMToolResultMessage` values preserve
+conversation structure, while transcript validation rejects orphaned,
+incomplete, or mismatched tool-result sequences. Tool output cannot grant
+authorization for a later action.
+
+Approval-required execution pauses before provider side effects. Resume uses
+the exact service-issued plan without regenerating the model decision.
+Continuation state and replay protection remain process-local and in-memory;
 they are not durable approval workflow state or authenticated human identity.
 
-Sequential multi-tool execution is not claimed to be atomic. A successful tool
-side effect cannot be rolled back merely because a later provider operation
-fails, so the current orchestration deliberately avoids automatic retries once
-execution has started.
+Sequential multi-tool execution is not atomic. Earlier successful side effects
+are not rolled back if a later provider execution fails, and automatic retries
+after execution starts remain intentionally absent.
 
-A future full conversational agent loop must preserve these controls while also
-adding explicit tool-result message semantics, a bounded global loop budget,
-durable state where required, and stronger human-approval lifecycle controls.
+Future hardening includes durable/distributed continuation state, authenticated
+human-approval lifecycle controls, elapsed-time/rate budgets, and stronger
+audit/observability support. MCP and workflow capabilities must preserve these
+same authority boundaries when introduced.
 
 ## 7. Minimize Sensitive Context
 
