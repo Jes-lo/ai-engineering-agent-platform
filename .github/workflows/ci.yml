@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.17"
+  PYTHON_VERSION: "3.13.15"
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: ./scripts/ci/install-actionlint.sh
+
+      - name: Validate GitHub Actions workflows
+        run: .tools/actionlint/1.7.12/actionlint
+
+  quality:
+    name: Python Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.13.15"
+          enable-cache: false
+
+      - name: Install managed Python
+        run: uv python install "${PYTHON_VERSION}"
+
+      - name: Run quality validation
+        run: ./scripts/ci/validate-quality.sh
+
+  supply-chain:
+    name: Supply Chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.13.15"
+          enable-cache: false
+
+      - name: Install managed Python
+        run: uv python install "${PYTHON_VERSION}"
+
+      - name: Run supply-chain validation
+        run: ./scripts/security/validate-supply-chain.sh
+
+      - name: Upload supply-chain evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-evidence
+          path: |
+            reports/licenses.json
+            reports/sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14

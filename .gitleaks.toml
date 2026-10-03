@@ -1,0 +1,14 @@
+title = "AI Engineering & Agent Platform"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore local generated and tool directories"
+paths = [
+  '''(^|/)\.venv/''',
+  '''(^|/)\.tools/''',
+  '''(^|/)dist/''',
+  '''(^|/)reports/''',
+  '''(^|/)\.git/''',
+]
