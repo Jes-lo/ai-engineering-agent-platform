@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.8
+Version: 0.9
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -443,6 +443,36 @@ The local Docker configuration and external development secret files are
 development mechanisms, not a production secret-management, backup, high
 availability, encryption, or disaster-recovery design.
 
+## Current RAG Evaluation Security Posture
+
+Deterministic RAG evaluation is now an active application surface.
+
+Current controls include:
+
+- every evaluation dataset has an explicit identifier, version, and
+  provenance reference;
+- case identifiers and expected relevant chunk identifiers must be unique;
+- evaluation output must match the case query and namespace;
+- grounding evidence must remain a subset of retrieval evidence;
+- grounding evidence must preserve the exact retrieved evidence objects;
+- citations must remain bound to evidence present in the final grounding
+  input;
+- retrieval, grounding, citation, and answer-status signals remain separate
+  instead of being hidden behind one opaque overall score;
+- evaluation cases execute in deterministic dataset order;
+- RAG/provider failures remain visible rather than being converted into
+  successful evaluation results;
+- the current evaluation layer does not load external datasets, fetch network
+  resources, open filesystem dataset paths, or invoke an LLM-as-a-judge.
+
+These controls protect structural evaluation integrity. They do not establish
+that dataset labels are semantically correct, unbiased, uncontaminated, or
+authorized for every use. Dataset provenance and review remain necessary.
+
+The current metrics evaluate evidence identity alignment. They do not prove
+semantic entailment, factual correctness, absence of hallucination, or model
+truthfulness.
+
 ## Current Grounded Generation Security Posture
 
 Grounded generation is now an active application surface over already validated
@@ -480,7 +510,7 @@ The grounding service also does not perform retrieval authorization. Callers
 must enforce user or tenant authorization before retrieved evidence becomes
 model context.
 
-Presentation-layer citation rendering, automated groundedness/citation-quality
+Presentation-layer citation rendering, semantic entailment/factual-correctness
 evaluation, and stronger prompt injection defenses remain future work.
 
 ## Current Knowledge Ingestion Security Posture
