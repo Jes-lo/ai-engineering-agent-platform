@@ -212,6 +212,7 @@ def test_upsert_creates_collection_and_records() -> None:
     async def exercise() -> None:
         await provider.upsert(
             VectorUpsertRequest(
+                space_id="test-space",
                 namespace="example",
                 records=(
                     _record(record_id="record-1"),
@@ -245,6 +246,7 @@ def test_upsert_reuses_existing_collection() -> None:
     asyncio.run(
         provider.upsert(
             VectorUpsertRequest(
+                space_id="test-space",
                 records=(_record(),),
             )
         )
@@ -265,6 +267,7 @@ def test_upsert_rejects_namespace_dimension_change() -> None:
         asyncio.run(
             provider.upsert(
                 VectorUpsertRequest(
+                    space_id="test-space",
                     records=(_record(),),
                 )
             )
@@ -305,6 +308,7 @@ def test_query_returns_normalized_ranked_results() -> None:
     response = asyncio.run(
         provider.query(
             VectorQueryRequest(
+                space_id="test-space",
                 vector=(
                     1.0,
                     2.0,
@@ -340,6 +344,7 @@ def test_query_missing_namespace_returns_empty_response() -> None:
     response = asyncio.run(
         provider.query(
             VectorQueryRequest(
+                space_id="test-space",
                 vector=(1.0,),
                 top_k=3,
                 namespace="missing",
@@ -362,6 +367,7 @@ def test_query_rejects_dimension_mismatch() -> None:
         asyncio.run(
             provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(
                         1.0,
                         2.0,
@@ -385,6 +391,7 @@ def test_delete_existing_namespace_uses_scoped_delete() -> None:
     asyncio.run(
         provider.delete(
             VectorDeleteRequest(
+                space_id="test-space",
                 record_ids=(
                     "record-1",
                     "record-2",
@@ -417,6 +424,7 @@ def test_delete_missing_namespace_is_noop() -> None:
     asyncio.run(
         provider.delete(
             VectorDeleteRequest(
+                space_id="test-space",
                 namespace="missing",
                 record_ids=("record-1",),
             )
@@ -440,6 +448,7 @@ def test_operational_error_is_normalized() -> None:
         asyncio.run(
             provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(1.0,),
                     top_k=1,
                 )
@@ -472,8 +481,127 @@ def test_malformed_database_result_is_normalized() -> None:
         asyncio.run(
             provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(1.0,),
                     top_k=1,
                 )
             )
         )
+
+
+def test_upsert_scopes_collection_by_namespace_and_space_id() -> None:
+    """Collection creation must use namespace and vector-space identity."""
+    provider, connection = _provider(
+        (
+            FakeCursor(one=None),
+            FakeCursor(one=(41, 3)),
+            FakeCursor(),
+        )
+    )
+
+    asyncio.run(
+        provider.upsert(
+            VectorUpsertRequest(
+                namespace="shared",
+                space_id="model-a",
+                records=(_record(),),
+            )
+        )
+    )
+
+    assert len(connection.calls) == 3
+
+    lookup_statement, lookup_params = connection.calls[0]
+
+    assert "namespace IS NOT DISTINCT FROM %s" in lookup_statement
+    assert "space_id = %s" in lookup_statement
+    assert lookup_params == (
+        "shared",
+        "model-a",
+    )
+
+    insert_statement, insert_params = connection.calls[1]
+
+    assert "INSERT INTO ai_platform.vector_collections" in insert_statement
+    assert "ON CONFLICT (namespace, space_id)" in insert_statement
+    assert insert_params == (
+        "shared",
+        "model-a",
+        3,
+    )
+
+
+def test_query_scopes_collection_by_namespace_and_space_id() -> None:
+    """Queries must resolve exactly one vector space."""
+    provider, connection = _provider(
+        (
+            FakeCursor(one=(7, 3)),
+            FakeCursor(many=()),
+        )
+    )
+
+    response = asyncio.run(
+        provider.query(
+            VectorQueryRequest(
+                namespace="shared",
+                space_id="model-b",
+                vector=(
+                    1.0,
+                    2.0,
+                    3.0,
+                ),
+                top_k=1,
+            )
+        )
+    )
+
+    assert response.results == ()
+    assert len(connection.calls) == 2
+
+    lookup_statement, lookup_params = connection.calls[0]
+
+    assert "namespace IS NOT DISTINCT FROM %s" in lookup_statement
+    assert "space_id = %s" in lookup_statement
+    assert lookup_params == (
+        "shared",
+        "model-b",
+    )
+
+
+def test_delete_scopes_collection_by_namespace_and_space_id() -> None:
+    """Delete must never cross a vector-space boundary."""
+    provider, connection = _provider(
+        (
+            FakeCursor(one=(7, 3)),
+            FakeCursor(),
+        )
+    )
+
+    asyncio.run(
+        provider.delete(
+            VectorDeleteRequest(
+                namespace="shared",
+                space_id="model-c",
+                record_ids=("record-1",),
+            )
+        )
+    )
+
+    assert len(connection.calls) == 2
+
+    lookup_statement, lookup_params = connection.calls[0]
+
+    assert "namespace IS NOT DISTINCT FROM %s" in lookup_statement
+    assert "space_id = %s" in lookup_statement
+    assert lookup_params == (
+        "shared",
+        "model-c",
+    )
+
+    delete_statement, delete_params = connection.calls[1]
+
+    assert "WHERE collection_id = %s" in delete_statement
+    assert delete_params == (
+        7,
+        ["record-1"],
+    )

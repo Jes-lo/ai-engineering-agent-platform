@@ -183,6 +183,8 @@ def build_retrieval_embedding_request(
 def build_vector_query_request(
     request: RetrievalRequest,
     embedding_response: EmbeddingResponse,
+    *,
+    space_id: str | None = None,
 ) -> VectorQueryRequest:
     """Map one query embedding into the vector-store query contract."""
     if len(embedding_response.embeddings) != 1:
@@ -190,9 +192,12 @@ def build_vector_query_request(
             "Embedding provider returned unexpected result count"
         )
 
+    resolved_space_id = embedding_response.model if space_id is None else space_id
+
     return VectorQueryRequest(
         vector=(embedding_response.embeddings[0].values),
         top_k=request.top_k,
+        space_id=resolved_space_id,
         namespace=request.namespace,
     )
 

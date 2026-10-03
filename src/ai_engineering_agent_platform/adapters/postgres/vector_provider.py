@@ -62,12 +62,13 @@ class PostgreSQLVectorStoreProvider:
         self,
         request: VectorUpsertRequest,
     ) -> None:
-        """Insert or replace all records atomically within one namespace."""
+        """Insert or replace records within one namespace and vector space."""
         try:
             async with self._pool.connection() as connection:
                 collection_id = await self._ensure_collection(
                     connection,
                     namespace=request.namespace,
+                    space_id=request.space_id,
                     dimensions=request.dimensions,
                 )
 
@@ -125,7 +126,8 @@ class PostgreSQLVectorStoreProvider:
             async with self._pool.connection() as connection:
                 collection = await self._find_collection(
                     connection,
-                    request.namespace,
+                    namespace=request.namespace,
+                    space_id=request.space_id,
                 )
 
                 if collection is None:
@@ -135,7 +137,7 @@ class PostgreSQLVectorStoreProvider:
 
                 if dimensions != request.dimensions:
                     raise ProviderExecutionError(
-                        "Vector namespace dimensionality does not match query"
+                        "Vector space dimensionality does not match query"
                     )
 
                 query_vector = build_vector_literal(request.vector)
@@ -189,12 +191,13 @@ class PostgreSQLVectorStoreProvider:
         self,
         request: VectorDeleteRequest,
     ) -> None:
-        """Delete requested records from one namespace."""
+        """Delete records from one namespace and vector space."""
         try:
             async with self._pool.connection() as connection:
                 collection = await self._find_collection(
                     connection,
-                    request.namespace,
+                    namespace=request.namespace,
+                    space_id=request.space_id,
                 )
 
                 if collection is None:
@@ -227,12 +230,14 @@ class PostgreSQLVectorStoreProvider:
         connection: AsyncConnection[TupleRow],
         *,
         namespace: str | None,
+        space_id: str,
         dimensions: int,
     ) -> int:
-        """Return collection id, creating the namespace when absent."""
+        """Return collection id for one namespace and vector space."""
         existing = await self._find_collection(
             connection,
-            namespace,
+            namespace=namespace,
+            space_id=space_id,
         )
 
         if existing is not None:
@@ -240,7 +245,7 @@ class PostgreSQLVectorStoreProvider:
 
             if existing_dimensions != dimensions:
                 raise ProviderExecutionError(
-                    "Vector namespace dimensionality does not match upsert"
+                    "Vector space dimensionality does not match upsert"
                 )
 
             return collection_id
@@ -249,10 +254,11 @@ class PostgreSQLVectorStoreProvider:
             """
             INSERT INTO ai_platform.vector_collections (
                 namespace,
+                space_id,
                 dimensions
             )
-            VALUES (%s, %s)
-            ON CONFLICT (namespace)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (namespace, space_id)
             DO NOTHING
             RETURNING
                 collection_id,
@@ -260,6 +266,7 @@ class PostgreSQLVectorStoreProvider:
             """,
             (
                 namespace,
+                space_id,
                 dimensions,
             ),
         )
@@ -278,19 +285,18 @@ class PostgreSQLVectorStoreProvider:
 
         concurrent = await self._find_collection(
             connection,
-            namespace,
+            namespace=namespace,
+            space_id=space_id,
         )
 
         if concurrent is None:
-            raise ProviderExecutionError(
-                "PostgreSQL could not resolve vector namespace"
-            )
+            raise ProviderExecutionError("PostgreSQL could not resolve vector space")
 
         collection_id, concurrent_dimensions = concurrent
 
         if concurrent_dimensions != dimensions:
             raise ProviderExecutionError(
-                "Vector namespace dimensionality does not match upsert"
+                "Vector space dimensionality does not match upsert"
             )
 
         return collection_id
@@ -298,9 +304,11 @@ class PostgreSQLVectorStoreProvider:
     async def _find_collection(
         self,
         connection: AsyncConnection[TupleRow],
+        *,
         namespace: str | None,
+        space_id: str,
     ) -> CollectionRow | None:
-        """Find collection identity and dimensionality by namespace."""
+        """Find collection by logical namespace and vector-space identity."""
         cursor = await connection.execute(
             """
             SELECT
@@ -308,8 +316,12 @@ class PostgreSQLVectorStoreProvider:
                 dimensions
             FROM ai_platform.vector_collections
             WHERE namespace IS NOT DISTINCT FROM %s
+              AND space_id = %s
             """,
-            (namespace,),
+            (
+                namespace,
+                space_id,
+            ),
         )
 
         row = await cursor.fetchone()

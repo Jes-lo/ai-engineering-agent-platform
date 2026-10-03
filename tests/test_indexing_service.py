@@ -133,6 +133,7 @@ def _embedding_response(
     *,
     dimensions: int = 3,
     count: int = 2,
+    model: str = "synthetic-model",
 ) -> EmbeddingResponse:
     """Create deterministic provider output."""
     embeddings = tuple(
@@ -145,7 +146,7 @@ def _embedding_response(
     )
 
     return EmbeddingResponse(
-        model="synthetic-model",
+        model=model,
         embeddings=embeddings,
         input_tokens=count,
     )
@@ -190,6 +191,7 @@ async def test_index_chunks_calls_providers_in_order() -> None:
     upsert = vector_store.upsert_requests[0]
 
     assert upsert.namespace == "test"
+    assert upsert.space_id == "synthetic-model"
 
     assert tuple(record.record_id for record in upsert.records) == (
         "doc:chunk:0:0:5",
@@ -374,3 +376,70 @@ def test_indexing_service_is_publicly_exported() -> None:
         "IndexingResult",
         "IndexingService",
     } <= set(services.__all__)
+
+
+@pytest.mark.anyio
+async def test_embedding_model_mismatch_prevents_upsert() -> None:
+    """A provider must not silently substitute another embedding model."""
+    embedding = SyntheticEmbeddingProvider(
+        response=_embedding_response(
+            model="unexpected-model",
+        )
+    )
+    vector_store = SyntheticVectorStore()
+
+    service = IndexingService(
+        embedding,
+        vector_store,
+        model="synthetic-model",
+        dimensions=3,
+    )
+
+    with pytest.raises(
+        ProviderExecutionError,
+        match="Embedding provider returned unexpected model",
+    ):
+        await service.index_chunks(_chunks())
+
+    assert len(embedding.requests) == 1
+    assert vector_store.upsert_requests == []
+
+
+@pytest.mark.anyio
+async def test_indexing_service_propagates_custom_space_id() -> None:
+    """A stricter caller-owned vector-space identity must be preserved."""
+    embedding = SyntheticEmbeddingProvider(response=_embedding_response())
+    vector_store = SyntheticVectorStore()
+
+    service = IndexingService(
+        embedding,
+        vector_store,
+        model="synthetic-model",
+        dimensions=3,
+        space_id="synthetic-model@revision-2",
+    )
+
+    await service.index_chunks(
+        _chunks(),
+        namespace="test",
+    )
+
+    assert len(vector_store.upsert_requests) == 1
+    assert vector_store.upsert_requests[0].space_id == "synthetic-model@revision-2"
+
+
+def test_indexing_service_rejects_empty_space_id() -> None:
+    """Invalid vector-space configuration must fail before provider use."""
+    embedding = SyntheticEmbeddingProvider(response=_embedding_response())
+    vector_store = SyntheticVectorStore()
+
+    with pytest.raises(
+        ValueError,
+        match="space_id must not be empty",
+    ):
+        IndexingService(
+            embedding,
+            vector_store,
+            model="synthetic-model",
+            space_id=" ",
+        )

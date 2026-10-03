@@ -82,6 +82,7 @@ def build_vector_upsert_request(
     embedding_response: EmbeddingResponse,
     *,
     namespace: str | None = None,
+    space_id: str | None = None,
 ) -> VectorUpsertRequest:
     """Map ordered chunks and embeddings into vector-store records."""
     if not chunks:
@@ -104,7 +105,10 @@ def build_vector_upsert_request(
         )
     )
 
+    resolved_space_id = embedding_response.model if space_id is None else space_id
+
     return VectorUpsertRequest(
         records=records,
+        space_id=resolved_space_id,
         namespace=namespace,
     )

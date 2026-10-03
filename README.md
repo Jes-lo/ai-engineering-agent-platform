@@ -181,7 +181,20 @@ The local persistence foundation includes:
 - Alembic migrations;
 - external database credentials rather than committed secrets;
 - an async Psycopg pool owned by runtime composition;
-- exact vector search without HNSW or IVFFlat indexes at this stage.
+- exact vector search without HNSW or IVFFlat indexes at this stage;
+- explicit provider-neutral `space_id` on vector upsert, query, and delete;
+- PostgreSQL collection identity scoped by `(namespace, space_id)`;
+- fail-closed embedding-response model validation before indexing or retrieval
+  reaches vector persistence.
+
+`namespace` remains the logical data partition. `space_id` independently
+identifies the vector/embedding space. Indexing and retrieval default that
+identity to the configured embedding model, while callers may provide a
+stricter identity when they control model revision or artifact provenance.
+
+The repository does not currently verify or pin an embedding-model revision or
+digest through `space_id`; providing such a stronger identifier remains the
+caller's responsibility.
 
 For local setup, migrations, credentials, operational boundaries, and
 integration validation, see

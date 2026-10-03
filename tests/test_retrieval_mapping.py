@@ -147,6 +147,7 @@ def test_vector_query_request_preserves_retrieval_constraints() -> None:
     )
     assert request.top_k == 2
     assert request.namespace == "synthetic"
+    assert request.space_id == "synthetic-model"
 
 
 def test_vector_query_rejects_multiple_query_embeddings() -> None:
