@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.7
+Version: 0.8
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -483,6 +483,41 @@ model context.
 Presentation-layer citation rendering, automated groundedness/citation-quality
 evaluation, and stronger prompt injection defenses remain future work.
 
+## Current Knowledge Ingestion Security Posture
+
+Bounded caller-supplied text ingestion is now an active application surface
+through `KnowledgeSource`, `parse_knowledge_source`, and
+`KnowledgeIngestionService`.
+
+Current controls include:
+
+- source content crosses the ingestion boundary as caller-supplied bytes;
+- only `text/plain` and `text/markdown` are accepted;
+- a configured positive source-size limit is enforced before decoding;
+- source bytes are decoded as strict UTF-8;
+- NUL-bearing text is rejected;
+- `source_ref` remains opaque provenance and is not interpreted as a
+  filesystem path or network location;
+- the current ingestion implementation imports no filesystem, network, or
+  subprocess execution capability;
+- chunk output must remain bound to the parsed document identity, source
+  reference, title, metadata, exact source offsets, and source text;
+- duplicate chunk identities and non-contiguous chunk indexes fail closed;
+- existing `IndexingService` embedding/vector validation remains authoritative
+  after ingestion validation;
+- source, parsing, chunking, embedding, or persistence failures are not
+  converted into successful ingestion results.
+
+The current ingestion boundary does not fetch URLs, open filesystem paths,
+parse PDF/DOCX/HTML or other rich binary formats, perform automatic retries,
+implement document replacement/reindex lifecycle orchestration, or provide
+authentication or tenant authorization.
+
+Knowledge content remains untrusted data after successful ingestion. Passing
+format, provenance, and chunk-integrity validation does not establish that the
+source is truthful, safe, authorized for every caller, or free from indirect
+prompt injection.
+
 ## Current End-to-End RAG Orchestration Security Posture
 
 End-to-end retrieval-to-generation composition is now an active application
@@ -571,8 +606,9 @@ similarity, provenance reconstruction, or reranking.
 
 The current retrieval foundation does not yet implement:
 
-- document or knowledge-source ingestion;
-- parsing of external knowledge sources;
+- filesystem or network knowledge-source acquisition;
+- PDF, DOCX, HTML, or other rich-document parsing;
+- document replacement/reindex lifecycle orchestration;
 - a public retrieval API;
 - a concrete reranker adapter or reranker runtime;
 - presentation-layer citation rendering;
@@ -589,12 +625,13 @@ The current retrieval foundation does not yet implement:
 - MCP integration;
 - workflow runtime.
 
-Retrieval, provider-neutral reranking, grounded generation, and end-to-end RAG
-orchestration are therefore active application surfaces rather than purely
-anticipatory surfaces. Knowledge-source ingestion, public retrieval exposure,
-tenant authorization, agents, MCP, workflows, and AI observability remain
-partially or wholly anticipatory and require additional executable controls
-when introduced.
+Bounded caller-supplied text ingestion, retrieval, provider-neutral
+reranking, grounded generation, and end-to-end RAG orchestration are active
+application surfaces rather than purely anticipatory surfaces.
+Filesystem/network source acquisition, richer document parsing, public
+retrieval exposure, tenant authorization, agents, MCP, workflows, and AI
+observability remain partially or wholly anticipatory and require additional
+executable controls when introduced.
 
 Each future feature must update this threat model when it materially
 changes:

@@ -17,6 +17,15 @@ from ai_engineering_agent_platform.services.indexing_mapping import (
     build_embedding_request,
     build_vector_upsert_request,
 )
+from ai_engineering_agent_platform.services.ingestion import (
+    DocumentChunker,
+    KnowledgeIngestionResult,
+    KnowledgeIngestionService,
+)
+from ai_engineering_agent_platform.services.ingestion_mapping import (
+    normalize_knowledge_media_type,
+    parse_knowledge_source,
+)
 from ai_engineering_agent_platform.services.rag import (
     RAGResult,
     RAGService,
@@ -38,10 +47,13 @@ from ai_engineering_agent_platform.services.retrieval_mapping import (
 )
 
 __all__ = [
+    "DocumentChunker",
     "GroundedGenerationResult",
     "GroundedGenerationService",
     "IndexingResult",
     "IndexingService",
+    "KnowledgeIngestionResult",
+    "KnowledgeIngestionService",
     "RAGResult",
     "RAGService",
     "RerankingService",
@@ -55,5 +67,7 @@ __all__ = [
     "build_retrieval_response",
     "build_vector_query_request",
     "build_vector_upsert_request",
+    "normalize_knowledge_media_type",
     "ordered_grounding_evidence",
+    "parse_knowledge_source",
 ]
