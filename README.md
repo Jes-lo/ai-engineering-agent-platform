@@ -15,22 +15,39 @@ The repository currently includes:
 - liveness and readiness endpoints;
 - provider-neutral contracts for language models, embeddings, rerankers,
   vector stores, and controlled tool execution;
+- immutable provider-neutral request and response models;
 - a domain-level provider exception hierarchy;
+- a concrete Ollama adapter implementing the language-model provider
+  contract;
+- non-streaming Ollama chat request and response mapping;
+- validated Ollama runtime configuration;
+- HTTP client and provider runtime composition with explicit lifecycle
+  ownership;
+- normalized provider errors for timeout, transport, HTTP-status, malformed
+  JSON, and malformed provider responses;
+- isolated Ollama adapter tests using mocked HTTP transport;
 - automated architectural dependency checks;
 - CI/CD and software supply-chain validation.
 
-The provider contracts define stable internal boundaries only. Concrete
-model adapters, model execution, persistent databases, RAG pipelines,
-executable tools, agents, MCP integrations, and workflow execution have not
-yet been implemented.
+Current model execution is available through the provider runtime boundary
+and uses Ollama's non-streaming chat API. The FastAPI application does not
+yet expose model-generation endpoints.
+
+Tool calling remains intentionally unsupported by the LLM contract. Non-empty
+provider `tool_calls` are rejected rather than executed or silently
+discarded.
+
+Persistent databases, RAG pipelines, executable tools, agents, MCP
+integrations, workflow execution, and AI observability backends have not yet
+been implemented.
 
 ## Planned Capabilities
 
 The platform is intended to evolve incrementally toward capabilities
 including:
 
-- local and remote model adapters;
-- model runtime configuration and execution;
+- additional local and remote model adapters;
+- streaming and richer model-capability handling;
 - embedding-provider adapters;
 - PostgreSQL and vector-search persistence;
 - retrieval-augmented generation;
@@ -76,6 +93,27 @@ Run local validation:
     uv run ruff format --check src tests
     uv run ruff check src tests
     uv run mypy src tests
+
+### Local Ollama Runtime
+
+Ollama is the first concrete LLM runtime integration. Ollama itself and model
+weights are not distributed by this repository.
+
+Runtime configuration uses:
+
+- `AI_PLATFORM_OLLAMA_BASE_URL`, defaulting to
+  `http://127.0.0.1:11434`;
+- `AI_PLATFORM_OLLAMA_REQUEST_TIMEOUT_SECONDS`, defaulting to `120`.
+
+The configured base URL must be an absolute HTTP or HTTPS origin without
+embedded credentials, path components, query parameters, or fragments.
+
+The current adapter supports non-streaming chat generation only. The runtime
+owns creation and cleanup of the HTTP client, while `OllamaLLMProvider`
+remains independent of HTTP-client lifecycle management.
+
+For an opt-in real-runtime validation procedure, see
+[Local Ollama Smoke Test](docs/operations/local-ollama-smoke-test.md).
 
 ## Continuous Integration
 
