@@ -16,6 +16,7 @@ from ai_engineering_agent_platform.domain.grounding import (
     GroundedAnswerStatus,
     GroundedCitation,
 )
+from ai_engineering_agent_platform.domain.ingestion import KnowledgeSource
 from ai_engineering_agent_platform.domain.retrieval import (
     DocumentChunk,
     KnowledgeDocument,
@@ -35,6 +36,7 @@ __all__ = [
     "GroundedAnswerStatus",
     "GroundedCitation",
     "KnowledgeDocument",
+    "KnowledgeSource",
     "PlatformError",
     "ProviderConfigurationError",
     "ProviderError",

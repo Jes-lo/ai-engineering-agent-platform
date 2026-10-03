@@ -46,6 +46,12 @@ The repository currently includes:
   ephemeral Docker Compose project;
 - deterministic character-window chunking with exact source offsets and
   preserved document provenance;
+- bounded caller-supplied knowledge-source ingestion for UTF-8 `text/plain`
+  and `text/markdown` payloads;
+- explicit source-size, media-type, UTF-8, NUL, and chunk-provenance
+  validation before indexing;
+- no filesystem or network source acquisition in the current ingestion
+  foundation;
 - provider-neutral indexing orchestration from validated chunks through the
   embedding provider into the vector-store provider;
 - provider-neutral semantic retrieval orchestration from query embedding
@@ -107,8 +113,10 @@ semantic entailment or factual verification of every generated claim.
 Retrieved evidence also remains untrusted data and may contain indirect prompt
 injection content.
 
-The repository still does not implement knowledge-source ingestion, a public
-retrieval API, a concrete reranker adapter, tenant-aware retrieval
+The repository now implements a bounded caller-supplied text ingestion
+foundation. It still does not implement filesystem or network source loaders,
+PDF/DOCX/HTML parsing, document replacement/reindex lifecycle orchestration, a
+public retrieval API, a concrete reranker adapter, tenant-aware retrieval
 authorization, presentation-layer citation rendering, semantic groundedness
 evaluation, executable tools, agents, MCP integrations, workflow execution, or
 AI observability backends.
@@ -121,7 +129,7 @@ including:
 - additional local and remote model adapters;
 - streaming and richer model-capability handling;
 - additional embedding-provider adapters;
-- knowledge-source ingestion and parsing;
+- additional knowledge-source loaders and richer document parsing (for example PDF, DOCX, and HTML);
 - public retrieval API exposure;
 - concrete local or remote reranker adapters;
 - production database hardening, backup/recovery, and availability patterns;

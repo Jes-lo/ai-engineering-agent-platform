@@ -34,8 +34,9 @@ The architecture prioritizes:
 
 The current repository implements foundational platform layers, concrete LLM
 and embedding runtime integrations through Ollama, a PostgreSQL + pgvector
-persistence foundation, and provider-neutral indexing, semantic retrieval,
-optional reranking, grounded generation, and end-to-end RAG orchestration.
+persistence foundation, bounded caller-supplied text ingestion, and
+provider-neutral indexing, semantic retrieval, optional reranking, grounded
+generation, and end-to-end RAG orchestration.
 
 Implemented capabilities currently include:
 
@@ -72,6 +73,16 @@ Implemented capabilities currently include:
   scoped delete behavior;
 - ordered JSONB metadata storage;
 - deterministic text chunking with exact source offsets and provenance;
+- a bounded `KnowledgeSource` ingestion boundary for caller-supplied bytes;
+- explicit `text/plain` and `text/markdown` source allowlisting;
+- strict UTF-8 decoding, source-size bounds, and NUL rejection before
+  chunking;
+- `KnowledgeIngestionService` orchestration from validated source bytes through
+  an injected chunker into the existing `IndexingService`;
+- validation that produced chunks remain bound to document identity, source
+  reference, title, metadata, offsets, and source text;
+- no filesystem or network source acquisition in the current ingestion
+  foundation;
 - provider-neutral indexing orchestration through `IndexingService`;
 - provider-neutral semantic retrieval through `RetrievalService`;
 - strict mapping from vector results into validated retrieval evidence;
@@ -290,10 +301,14 @@ provider-neutral `RerankerProvider`. Reranking preserves the original vector
 score and rank separately from the reranker score and final rank. No concrete
 reranker adapter or reranker runtime is implemented yet.
 
-The current RAG foundation still does not include knowledge-source ingestion,
-parsing, a public retrieval API, tenant-aware retrieval authorization,
-presentation-layer citation rendering, or semantic groundedness/entailment
-verification.
+The current RAG foundation now includes bounded ingestion of
+caller-supplied UTF-8 `text/plain` and `text/markdown` payloads. Source
+references remain opaque provenance; the ingestion layer does not read
+filesystem paths or fetch network resources. Filesystem/network source
+loaders, PDF/DOCX/HTML parsing, document replacement/reindex lifecycle
+orchestration, a public retrieval API, tenant-aware retrieval authorization,
+presentation-layer citation rendering, and semantic groundedness/entailment
+verification remain outside the current implementation.
 
 ### Knowledge and RAG
 
@@ -337,11 +352,12 @@ The broader RAG subsystem evolves through the following target flow:
       v
     grounded answer + citations
 
-Features 6, 7, and 8 currently cover deterministic chunking, embeddings and
-indexing orchestration, semantic retrieval, evidence reconstruction,
-provider-neutral optional reranking, deterministic context assembly, grounded
-model generation, explicit abstention, citation-marker resolution back to
-validated evidence, and end-to-end retrieval-to-generation composition.
+Features 6 through 9 currently cover bounded caller-supplied text
+ingestion, deterministic chunking, embeddings and indexing orchestration,
+semantic retrieval, evidence reconstruction, provider-neutral optional
+reranking, deterministic context assembly, grounded model generation, explicit
+abstention, citation-marker resolution back to validated evidence, and
+end-to-end retrieval-to-generation composition.
 
 `RAGService` invokes `RetrievalService`, optionally applies
 `RerankingService`, and supplies the resulting validated evidence to
@@ -366,8 +382,10 @@ prove that every generated sentence is semantically entailed by its cited
 evidence, that the evidence is true, or that indirect prompt injection has been
 eliminated.
 
-Source ingestion, presentation-layer citation rendering, and automated
-semantic groundedness/citation-quality evaluation remain future stages.
+Filesystem/network source acquisition, richer document parsing,
+document replacement/reindex lifecycle orchestration, presentation-layer
+citation rendering, and automated semantic groundedness/citation-quality
+evaluation remain future stages.
 
 Retrieval and answer-grounding quality must eventually be measurable through
 evaluations rather than judged only manually.
