@@ -4,10 +4,11 @@
 
 Version: 0.1
 
-This threat model describes the initial security assumptions and threat
-categories for the AI Engineering & Agent Platform.
+This threat model describes the initial and evolving security assumptions
+and threat categories for the AI Engineering & Agent Platform.
 
-It will evolve as executable platform capabilities are introduced.
+It is reviewed as additional executable platform capabilities and trust
+boundaries are introduced.
 
 ## Security Objectives
 
@@ -337,12 +338,21 @@ The following rules should remain true as the project evolves:
 
 ## Current Limitations
 
-No runtime AI service, model integration, database, tool execution,
-agent runtime, or MCP integration exists yet.
+The repository currently contains a Python/FastAPI application runtime,
+health and readiness endpoints, and provider-neutral contracts for language
+models, embeddings, rerankers, vector stores, and tools.
 
-Therefore this version identifies anticipated attack surfaces rather
-than asserting that controls for those attack surfaces are already
-implemented.
+These contracts define internal boundaries and validated data structures;
+they do not themselves invoke models, access external providers, persist
+vectors, or execute tools.
+
+No concrete model-provider adapter, model execution, persistent database,
+production vector-store integration, tool execution, agent runtime, MCP
+integration, or workflow runtime exists yet.
+
+Many AI-specific attack surfaces documented above therefore remain
+anticipatory. Controls for those attack surfaces must become executable and
+testable as the corresponding runtime capabilities are introduced.
 
 Each future feature must update this threat model when it materially
 changes:

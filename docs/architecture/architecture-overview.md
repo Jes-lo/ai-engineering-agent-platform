@@ -30,6 +30,31 @@ The architecture prioritizes:
 - independent demonstration;
 - responsible handling of third-party components and data.
 
+## Current Implementation
+
+The current repository implements the foundational platform layers rather
+than the complete target architecture.
+
+Implemented capabilities currently include:
+
+- a Python/FastAPI application runtime;
+- liveness and readiness API endpoints;
+- a provider-neutral base `Provider` contract;
+- provider contracts for language models, embeddings, rerankers, vector
+  stores, and tools;
+- immutable provider-neutral request, response, and value objects;
+- a domain-level provider exception hierarchy;
+- architectural dependency checks protecting the contracts and domain
+  layers;
+- CI/CD and software supply-chain validation.
+
+The `adapters` package currently establishes the implementation boundary,
+but no provider-specific adapters have been added yet.
+
+There is currently no model invocation, persistent database, production
+vector store, RAG pipeline, agent runtime, executable tool integration, MCP
+integration, workflow runtime, or AI observability backend.
+
 ## High-Level Architecture
 
 The target architecture is conceptually organized as follows:
@@ -301,12 +326,14 @@ The project will evolve incrementally.
 
 Early development should favor a reproducible local environment.
 
+The repository already includes a CI/CD and software supply-chain
+validation baseline.
+
 Later stages may introduce:
 
 - containers;
 - Kubernetes;
 - infrastructure as code;
-- CI/CD;
 - centralized observability;
 - hardened runtime configurations.
 

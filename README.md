@@ -8,26 +8,36 @@ platform engineering practices.
 
 Early development.
 
-The repository contains the initial governance, security, architecture,
-and Python/FastAPI application foundation.
+The repository currently includes:
 
-AI models, RAG, agents, persistent storage, tools, MCP integrations, and
-workflow capabilities have not yet been implemented.
+- repository governance, security, architecture, and engineering standards;
+- a Python/FastAPI application foundation;
+- liveness and readiness endpoints;
+- provider-neutral contracts for language models, embeddings, rerankers,
+  vector stores, and controlled tool execution;
+- a domain-level provider exception hierarchy;
+- automated architectural dependency checks;
+- CI/CD and software supply-chain validation.
+
+The provider contracts define stable internal boundaries only. Concrete
+model adapters, model execution, persistent databases, RAG pipelines,
+executable tools, agents, MCP integrations, and workflow execution have not
+yet been implemented.
 
 ## Planned Capabilities
 
 The platform is intended to evolve incrementally toward capabilities
 including:
 
-- model-provider abstraction;
 - local and remote model adapters;
-- embeddings;
-- PostgreSQL and vector search;
+- model runtime configuration and execution;
+- embedding-provider adapters;
+- PostgreSQL and vector-search persistence;
 - retrieval-augmented generation;
-- retrieval and reranking;
+- retrieval and reranking pipelines;
 - grounded responses and citations;
 - agent execution;
-- tool calling;
+- authorized tool calling;
 - MCP integrations and a project-owned MCP server;
 - workflow automation;
 - human-in-the-loop approval;
@@ -36,7 +46,6 @@ including:
 - AI and application observability;
 - OpenTelemetry;
 - metrics and dashboards;
-- CI/CD and software supply-chain controls;
 - an AI Developer Console.
 
 Capabilities listed here describe project direction and are not considered
