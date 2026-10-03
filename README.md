@@ -88,6 +88,33 @@ Tool calling remains intentionally unsupported by the LLM contract. Non-empty
 provider `tool_calls` are rejected rather than executed or silently
 discarded.
 
+## Controlled Tool Execution Foundation
+
+The platform now includes a provider-neutral controlled tool execution
+foundation built on the existing `ToolProvider`, `ToolDefinition`,
+`ToolInvocation`, and `ToolResult` contracts.
+
+`ToolRegistry` requires globally unique tool identities and explicit policy
+coverage for every registered tool. `ToolExecutionService` then enforces:
+
+- an explicit per-execution tool allowlist;
+- enabled/disabled platform policy;
+- structural approval evidence when policy requires it;
+- exact `call_id` plus `tool_name` approval binding;
+- strict required/unexpected argument validation;
+- portable scalar argument type validation without coercion;
+- exact result-to-invocation identity validation;
+- provider failure propagation without implicit retries.
+
+The current `ToolApprovalGrant` is structural approval evidence only. It is
+not yet an identity-bound, persistent, signed, expiring, or single-use
+human-in-the-loop approval system.
+
+LLM tool calling remains intentionally separate. Ollama responses containing
+non-empty `tool_calls` are still rejected, and this feature does not add an
+agent loop, MCP integration, workflow execution, n8n, shell execution,
+filesystem tools, or network tools.
+
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
 indexing, semantic retrieval, validated evidence reconstruction, optional
@@ -145,7 +172,7 @@ including:
 - presentation-layer citation rendering and automated semantic
   groundedness/citation-quality evaluation;
 - agent execution;
-- authorized tool calling;
+- LLM tool-call parsing and model-driven tool selection;
 - MCP integrations and a project-owned MCP server;
 - workflow automation;
 - human-in-the-loop approval;

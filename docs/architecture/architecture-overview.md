@@ -117,7 +117,7 @@ boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
 endpoint, streaming model generation, concrete reranker adapter, agent runtime,
-executable tool integration, MCP integration, workflow runtime, or AI
+LLM-driven tool-call parsing, MCP integration, workflow runtime, or AI
 observability backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
@@ -410,21 +410,36 @@ Agents must not receive unrestricted platform permissions by default.
 
 ### Tool Registry
 
-Tools will be explicit platform resources.
+Tools are explicit platform resources behind provider-neutral contracts.
 
-Each tool should eventually expose metadata such as:
+The current controlled execution foundation registers `ToolProvider`
+definitions through `ToolRegistry`. Registration fails closed unless:
 
-- identifier;
-- description;
-- input contract;
-- output contract;
-- required permissions;
-- timeout;
-- risk classification;
-- approval requirements.
+- provider identities are unique;
+- tool names are globally unique;
+- every registered tool has one explicit `ToolExecutionPolicy`;
+- policy entries do not refer to unknown tools.
 
-Tool metadata must not automatically be considered trusted merely
-because it was supplied by an external integration.
+Each current policy records whether a tool is enabled and whether execution
+requires approval. Every execution also receives a
+`ToolExecutionAuthorization` containing an explicit tool allowlist and
+optional `ToolApprovalGrant` values.
+
+Before a provider is invoked, `ToolExecutionService` validates authorization,
+required approval, declared arguments, and portable scalar argument types.
+Arguments are not coerced. After provider execution, result `call_id` and
+`tool_name` identities must match the exact invocation.
+
+The current approval grant is deliberately structural: it binds exact
+`call_id` and `tool_name` values but does not yet represent authenticated
+human identity, persistence, signatures, expiry, revocation, or single-use
+consumption.
+
+This layer does not parse LLM tool calls and does not implement an agent loop,
+MCP discovery, workflow execution, n8n integration, shell execution,
+filesystem tools, network tools, or automatic retries. Ollama non-empty
+`tool_calls` therefore remain rejected until later model/tool orchestration is
+implemented on top of these controls.
 
 ### MCP
 
