@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.1
+Version: 1.2
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -217,8 +217,9 @@ fails closed. A parsed proposal remains separate from `ToolInvocation`,
 `ToolExecutionAuthorization`, approval state, and `ToolExecutionService`, so
 model output cannot directly acquire execution authority.
 
-Agent loops, MCP integration, workflows, n8n integration, richer authorization
-scopes, and full human-approval lifecycle controls remain future work.
+Full conversational agent loops, MCP integration, workflows, n8n integration,
+richer authorization scopes, durable continuation state, and authenticated
+human-approval lifecycle controls remain future work.
 
 ### LLM Tool-Call Proposal Threat Boundary
 
@@ -242,11 +243,59 @@ Current controls are:
 - grounded generation remains STOP-only and therefore rejects tool-call
   proposal responses.
 
-This feature does not establish a complete agent security boundary. It does
-not create controlled `ToolInvocation` values from model output, return tool
-results to the model, add `MessageRole.TOOL`, implement an agent loop,
-provide authenticated HITL approval lifecycle semantics, connect MCP,
-execute workflows, integrate n8n, or add shell/filesystem/network tools.
+The LLM proposal layer alone still does not execute tools or grant authority.
+The separate `ControlledAgentService` may convert an accepted proposal into a
+controlled `ToolInvocation`, but only after the proposed tool was explicitly
+exposed from the registered/enabled/authorized set. The orchestration layer
+uses fresh platform-owned call identity, bounded proposal counts, whole-plan
+preflight, and approval pause/resume semantics. It still does not return tool
+results to the model, add `MessageRole.TOOL`, implement a full conversational
+loop, provide durable or authenticated HITL state, connect MCP, execute
+workflows, integrate n8n, or add shell/filesystem/network tools.
+
+### Controlled Agent Turn Orchestration Threat Boundary
+
+The controlled single-turn agent surface introduces an execution bridge between
+untrusted model proposals and registered tool providers.
+
+Current controls are:
+
+- caller-supplied `run_id` is correlation metadata only;
+- the caller cannot inject arbitrary `LLMRequest.tools` into this orchestration
+  surface;
+- only registered, enabled, explicitly authorized tools become model-visible;
+- proposals outside that exact exposure set fail closed;
+- each turn has a caller-selected step budget under the absolute platform
+  ceiling `MAX_AGENT_TURN_STEPS = 8`;
+- provider-originating call IDs remain metadata and cannot become execution
+  authority;
+- the default execution call ID includes a fresh UUID4 nonce created by the
+  platform;
+- every planned invocation is preflighted before the first provider side
+  effect;
+- missing structural approvals pause the whole plan instead of partially
+  executing it;
+- a resumable plan must be an active continuation issued by the same service
+  instance;
+- successful resume consumes the continuation before provider execution,
+  preventing same-instance replay;
+- a resumed plan reuses the original model proposal and does not ask the model
+  to regenerate a possibly different action.
+
+Residual limitations are explicit:
+
+- pending continuations exist only in process memory;
+- a process restart invalidates that continuation instead of restoring it;
+- replay protection is therefore process-local rather than durable;
+- `ToolApprovalGrant` remains structural evidence, not authenticated human
+  identity or approval provenance;
+- sequential multi-tool execution is not transactional;
+- a later provider failure cannot roll back an earlier successful side effect;
+- automatic retry after tool execution starts is intentionally absent;
+- there is no current `MessageRole.TOOL` or tool-result-to-model round trip;
+- there is no full conversational agent loop;
+- there is no MCP, workflow engine, n8n execution, shell tool, filesystem tool,
+  or network tool in this orchestration layer.
 
 ### MCP Trust Failure
 
@@ -658,8 +707,8 @@ runtime layers.
 The current Ollama runtime does not implement:
 
 - streaming model responses;
-- agent-driven conversion of accepted LLM proposals into controlled tool
-  invocations and tool-result conversation round trips;
+- full conversational agent loops that serialize validated tool results back
+  to the model under an explicit tool-result message contract;
 - automatic retries;
 - provider authentication;
 - model routing;
@@ -715,7 +764,7 @@ The current retrieval foundation does not yet implement:
 - repository-defined encryption-at-rest controls;
 - approximate-nearest-neighbor indexes;
 - adversarial retrieval evaluations;
-- agent runtime;
+- durable/full conversational agent runtime;
 - MCP integration;
 - workflow runtime.
 
@@ -747,7 +796,7 @@ materially changes:
 - model providers;
 - knowledge ingestion;
 - vector retrieval;
-- agent execution;
+- durable/full conversational agent execution;
 - tools;
 - MCP;
 - workflow automation;

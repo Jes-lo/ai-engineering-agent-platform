@@ -1,5 +1,17 @@
 """Provider-neutral application services and orchestration helpers."""
 
+from ai_engineering_agent_platform.services.agent import (
+    MAX_AGENT_TURN_STEPS,
+    AgentOrchestrationError,
+    AgentPlannedToolCall,
+    AgentResponseError,
+    AgentResumeError,
+    AgentStepLimitError,
+    AgentTurnRequest,
+    AgentTurnResult,
+    AgentTurnStatus,
+    ControlledAgentService,
+)
 from ai_engineering_agent_platform.services.evaluation import (
     RAGEvaluationCaseExecution,
     RAGEvaluationRunResult,
@@ -63,6 +75,7 @@ from ai_engineering_agent_platform.services.tool_execution import (
     ToolExecutionAuthorization,
     ToolExecutionControlError,
     ToolExecutionPolicy,
+    ToolExecutionPreflight,
     ToolExecutionService,
     ToolInputValidationError,
     ToolRegistration,
@@ -72,6 +85,16 @@ from ai_engineering_agent_platform.services.tool_execution import (
 )
 
 __all__ = [
+    "MAX_AGENT_TURN_STEPS",
+    "AgentOrchestrationError",
+    "AgentPlannedToolCall",
+    "AgentResponseError",
+    "AgentResumeError",
+    "AgentStepLimitError",
+    "AgentTurnRequest",
+    "AgentTurnResult",
+    "AgentTurnStatus",
+    "ControlledAgentService",
     "ControlledToolExecutionResult",
     "DocumentChunker",
     "GroundedGenerationResult",
@@ -94,6 +117,7 @@ __all__ = [
     "ToolExecutionAuthorization",
     "ToolExecutionControlError",
     "ToolExecutionPolicy",
+    "ToolExecutionPreflight",
     "ToolExecutionService",
     "ToolInputValidationError",
     "ToolRegistration",

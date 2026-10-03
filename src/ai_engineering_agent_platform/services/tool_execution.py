@@ -204,6 +204,36 @@ class ToolRegistration:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolExecutionPreflight:
+    """Validated execution metadata produced without provider side effects."""
+
+    registration: ToolRegistration
+    invocation: ToolInvocation
+    approval_required: bool
+    approval_used: bool
+
+    def __post_init__(self) -> None:
+        """Validate preflight identity and approval relationships."""
+        if self.registration.definition.name != self.invocation.tool_name:
+            raise ValueError("registration does not match invocation")
+
+        if not isinstance(
+            self.approval_required,
+            bool,
+        ):
+            raise ValueError("approval_required must be a boolean")
+
+        if not isinstance(
+            self.approval_used,
+            bool,
+        ):
+            raise ValueError("approval_used must be a boolean")
+
+        if self.approval_used and not self.approval_required:
+            raise ValueError("approval cannot be used when it was not required")
+
+
+@dataclass(frozen=True, slots=True)
 class ControlledToolExecutionResult:
     """Auditable application-level result of one authorized tool call."""
 
@@ -532,11 +562,10 @@ class ToolRegistry:
 
 
 class ToolExecutionService:
-    """Authorize, validate, execute, and verify one tool invocation.
+    """Validate and execute controlled tool invocations.
 
-    This service does not parse model tool calls, run an agent loop, perform
-    retries, persist approvals, discover external tools, or grant permissions
-    implicitly.
+    Validation is available separately so orchestration can verify every
+    planned invocation before the first provider side effect.
     """
 
     def __init__(
@@ -546,13 +575,13 @@ class ToolExecutionService:
         """Store the explicit tool registry."""
         self._registry = registry
 
-    async def execute(
+    def validate(
         self,
         invocation: ToolInvocation,
         *,
         authorization: ToolExecutionAuthorization,
-    ) -> ControlledToolExecutionResult:
-        """Execute one invocation only after deterministic policy checks."""
+    ) -> ToolExecutionPreflight:
+        """Validate one invocation without calling its provider."""
         if not isinstance(
             invocation,
             ToolInvocation,
@@ -595,6 +624,27 @@ class ToolExecutionService:
             invocation,
         )
 
+        return ToolExecutionPreflight(
+            registration=registration,
+            invocation=invocation,
+            approval_required=(policy.requires_approval),
+            approval_used=approval_used,
+        )
+
+    async def execute(
+        self,
+        invocation: ToolInvocation,
+        *,
+        authorization: ToolExecutionAuthorization,
+    ) -> ControlledToolExecutionResult:
+        """Execute one invocation after the same deterministic preflight."""
+        preflight = self.validate(
+            invocation,
+            authorization=authorization,
+        )
+
+        binding = self._registry._resolve(invocation.tool_name)
+
         provider_result = await binding.provider.execute(invocation)
 
         result = _validate_provider_result(
@@ -603,9 +653,9 @@ class ToolExecutionService:
         )
 
         return ControlledToolExecutionResult(
-            registration=registration,
+            registration=preflight.registration,
             invocation=invocation,
             result=result,
-            approval_required=(policy.requires_approval),
-            approval_used=approval_used,
+            approval_required=(preflight.approval_required),
+            approval_used=preflight.approval_used,
         )
