@@ -114,15 +114,29 @@ The current `ToolApprovalGrant` is structural approval evidence only. It is
 not yet an identity-bound, persistent, signed, expiring, or single-use
 human-in-the-loop approval system.
 
-LLM proposal parsing and controlled tool execution remain intentionally
-separate. Ollama non-empty `tool_calls` are normalized only when the request
-explicitly exposed the proposed tool name. Unrequested tool names fail
-closed. Parsing produces inert `LLMToolCall` values and never invokes
-`ToolExecutionService`, grants approval, creates a controlled
-`ToolInvocation`, or bypasses the Feature 11 execution policy. Agent loops,
-tool-result round trips, a `MessageRole.TOOL` conversation role, MCP,
-workflows, n8n, shell execution, filesystem tools, and network tools remain
-outside this feature.
+The provider adapter still produces inert `LLMToolCall` values and never
+executes tools by itself. A separate `ControlledAgentService` may now expose
+only registered, enabled, explicitly authorized tools to an LLM and convert
+accepted proposals into controlled `ToolInvocation` values. Execution IDs are
+created by the platform with a fresh UUID4-backed nonce by default;
+`provider_call_id` remains untrusted metadata and never becomes execution
+authority.
+
+Before the first provider side effect, every planned invocation is checked
+through the side-effect-free `ToolExecutionService.validate()` boundary. A
+missing structural approval produces an `APPROVAL_REQUIRED` result instead of
+executing the batch. `resume()` accepts only an active continuation previously
+issued by the same service instance and consumes that continuation before
+provider execution, providing in-memory replay protection without re-running
+the LLM decision.
+
+This is deliberately not a full conversational agent loop. Pending
+continuations are in-memory and are lost on process restart. The tool batch is
+sequential, not transactional, and a later provider failure does not roll back
+an earlier side effect. Automatic retry after execution starts is intentionally
+absent. Tool-result messages, `MessageRole.TOOL`, tool-result round trips to the
+LLM, authenticated human approval lifecycle, MCP, workflows, n8n, shell tools,
+filesystem tools, and network tools remain outside this feature.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
@@ -180,9 +194,9 @@ including:
 - tenant-aware retrieval authorization and data lifecycle controls;
 - presentation-layer citation rendering and automated semantic
   groundedness/citation-quality evaluation;
-- agent execution;
-- agent orchestration that converts accepted LLM tool-call proposals into
-  controlled `ToolInvocation` values and returns tool results to the model;
+- durable/full conversational agent execution;
+- full conversational agent orchestration that returns validated tool results
+  to the model through an explicit tool-result message contract;
 - MCP integrations and a project-owned MCP server;
 - workflow automation;
 - human-in-the-loop approval;

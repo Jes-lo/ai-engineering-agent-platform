@@ -116,8 +116,8 @@ implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
-endpoint, streaming model generation, concrete reranker adapter, agent runtime,
-agent-loop tool execution, MCP integration, workflow runtime, or AI
+endpoint, streaming model generation, concrete reranker adapter, full conversational agent loop,
+MCP integration, workflow runtime, or AI
 observability backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
@@ -393,20 +393,50 @@ manually. The current metrics compare retrieved, grounding, and cited chunk
 identities against explicit versioned dataset expectations. They do not infer
 semantic entailment or factual correctness.
 
-### Agent Runtime
+### Controlled Agent Turn Orchestration Boundary
 
-The agent runtime will coordinate controlled AI-driven execution.
+The platform now includes a bounded single-turn orchestration layer through
+`ControlledAgentService`.
 
-Agent behavior may include:
+The orchestration boundary:
 
-- reasoning over context;
-- selecting approved tools;
-- invoking workflows;
-- maintaining bounded execution state;
-- requesting human approval;
-- returning structured execution results.
+- accepts a caller correlation `run_id` but does not treat it as execution
+  authority;
+- owns the model-visible tool set instead of accepting pre-populated
+  `LLMRequest.tools` from the caller;
+- resolves only tools that are registered, enabled by platform policy, and
+  explicitly present in `ToolExecutionAuthorization`;
+- accepts only `STOP` or `TOOL_CALLS` as valid turn outcomes;
+- applies a caller-selected `max_steps` with a hard platform ceiling of
+  `MAX_AGENT_TURN_STEPS = 8`;
+- rechecks every proposed tool against the exact exposure set;
+- creates a new platform-owned `ToolInvocation.call_id` using a fresh
+  UUID4-backed nonce by default;
+- never treats provider-originating `provider_call_id` metadata as execution
+  identity or authority;
+- preflights every planned invocation through
+  `ToolExecutionService.validate()` before the first provider side effect;
+- returns an `APPROVAL_REQUIRED` state when exact structural approval is
+  missing;
+- keeps only service-issued pending continuations eligible for `resume()`;
+- can resume an approved frozen plan without asking the model to regenerate
+  the decision;
+- consumes the pending continuation before provider execution so a completed
+  continuation cannot be replayed through the same service instance.
 
-Agents must not receive unrestricted platform permissions by default.
+The current continuation registry is process-local and in-memory. It is not
+durable across restarts, distributed across replicas, or an authenticated
+human-in-the-loop approval system.
+
+A planned batch executes sequentially after preflight. It is not
+transactional. If one provider execution succeeds and a later execution fails,
+the platform does not claim rollback or atomicity, and it deliberately does not
+automatically replay the batch after execution has started.
+
+The current layer is still not a full conversational agent loop. It does not
+add `MessageRole.TOOL`, serialize tool results back into LLM messages, perform
+tool-result/model round trips, execute MCP capabilities or workflows, integrate
+n8n, or add shell/filesystem/network tools.
 
 ### LLM Tool-Call Proposal Boundary
 
@@ -428,12 +458,13 @@ Responses with one or more proposals use `FinishReason.TOOL_CALLS`. A
 under another finish reason, is invalid at the provider-neutral contract
 boundary.
 
-The proposal layer deliberately performs no execution. It does not create a
-`ToolInvocation`, call `ToolExecutionService`, grant authorization or
-approval, or return tool results to the model. There is not yet a
-`MessageRole.TOOL` role or agent loop. Existing non-agentic grounded
-generation continues to accept only `FinishReason.STOP`, so tool proposals
-fail closed there.
+The provider proposal layer itself deliberately performs no execution and
+continues to return untrusted `LLMToolCall` values. Execution identity,
+authorization, policy, approval, and provider execution remain outside the
+LLM adapter. The separate `ControlledAgentService` is the only current bridge
+from accepted proposals to controlled `ToolInvocation` values, and that bridge
+applies explicit exposure, authorization, bounded-step, fresh-identity, and
+preflight controls before execution.
 
 ### Tool Registry
 
@@ -462,14 +493,15 @@ The current approval grant is deliberately structural: it binds exact
 human identity, persistence, signatures, expiry, revocation, or single-use
 consumption.
 
-The controlled execution layer itself still does not parse model output.
-The LLM/Ollama adapter now exposes explicitly supplied `ToolDefinition`
-values and can normalize matching Ollama `tool_calls` into inert
-`LLMToolCall` proposals. Those proposals do not create execution identity,
-do not satisfy approval, and do not call `ToolExecutionService`. Agent-loop
-orchestration, tool-result round trips, MCP discovery, workflow execution,
-n8n integration, shell execution, filesystem tools, network tools, and
-automatic retries remain separate future capabilities.
+The controlled execution service itself remains model-agnostic.
+`ToolExecutionService.validate()` provides the same deterministic
+registration, enabled-policy, allowlist, approval, and argument checks used by
+`execute()` without calling the provider. `ControlledAgentService` composes
+that boundary with `LLMToolCall` proposals, but provider output never grants
+approval or bypasses execution policy. Full tool-result conversation loops,
+durable agent state, authenticated HITL approval, MCP discovery, workflow
+execution, n8n integration, shell tools, filesystem tools, and network tools
+remain future capabilities.
 
 ### MCP
 
