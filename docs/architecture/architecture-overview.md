@@ -387,8 +387,11 @@ document replacement/reindex lifecycle orchestration, presentation-layer
 citation rendering, and automated semantic groundedness/citation-quality
 evaluation remain future stages.
 
-Retrieval and answer-grounding quality must eventually be measurable through
-evaluations rather than judged only manually.
+Retrieval and answer-grounding quality is now measurable through a
+deterministic structural evaluation foundation rather than judged only
+manually. The current metrics compare retrieved, grounding, and cited chunk
+identities against explicit versioned dataset expectations. They do not infer
+semantic entailment or factual correctness.
 
 ### Agent Runtime
 
@@ -445,11 +448,36 @@ not needed.
 Human approval should be introduced for actions where the impact
 justifies confirmation.
 
+### Deterministic RAG Evaluation Foundation
+
+The platform now provides infrastructure-independent contracts for versioned
+RAG evaluation datasets with explicit dataset identity, version, and
+provenance reference.
+
+`RAGEvaluationService` executes cases sequentially through an injected
+`RAGRunner` and preserves each `RAGResult` alongside transparent metrics.
+
+Current deterministic metrics are:
+
+- retrieval precision and retrieval recall against expected relevant chunk identifiers;
+- grounding precision and grounding recall over the final grounding input after optional reranking;
+- citation precision and citation recall over the evidence actually cited;
+- answer-status accuracy for expected answered versus abstained outcomes;
+- macro-averaged dataset summaries with each metric kept independent.
+
+Evaluation validates query/namespace alignment and verifies that grounding
+evidence remains drawn from retrieval and citations remain bound to the exact
+grounding evidence objects.
+
+This foundation intentionally does not claim semantic entailment, factual
+correctness, hallucination elimination, LLM-as-a-judge scoring, or external
+dataset trust.
+
 ### Evaluation
 
-Evaluation will be a first-class platform capability.
+Evaluation is a first-class platform capability.
 
-Planned evaluation areas include:
+Current and planned evaluation areas include:
 
 - retrieval relevance;
 - answer grounding;

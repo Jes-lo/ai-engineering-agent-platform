@@ -11,6 +11,12 @@ from ai_engineering_agent_platform.domain.errors import (
     ProviderExecutionError,
     ProviderUnavailableError,
 )
+from ai_engineering_agent_platform.domain.evaluation import (
+    RAGEvaluationCase,
+    RAGEvaluationDataset,
+    RAGEvaluationMetrics,
+    RAGEvaluationSummary,
+)
 from ai_engineering_agent_platform.domain.grounding import (
     GroundedAnswer,
     GroundedAnswerStatus,
@@ -42,6 +48,10 @@ __all__ = [
     "ProviderError",
     "ProviderExecutionError",
     "ProviderUnavailableError",
+    "RAGEvaluationCase",
+    "RAGEvaluationDataset",
+    "RAGEvaluationMetrics",
+    "RAGEvaluationSummary",
     "RerankedEvidence",
     "RerankedRetrievalResponse",
     "RetrievalMetadataItem",

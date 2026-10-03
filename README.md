@@ -110,6 +110,14 @@ grounded generation.
 
 This establishes citation integrity and provenance binding, not automatic
 semantic entailment or factual verification of every generated claim.
+
+The current evaluation foundation adds versioned, provenance-aware RAG
+evaluation datasets and deterministic execution through
+`RAGEvaluationService`. It measures retrieval, final grounding-input, and
+citation precision/recall against explicit expected chunk identifiers, plus
+answer-status accuracy. These are structural evidence-alignment metrics; they
+do not establish semantic entailment, factual correctness, or model
+truthfulness.
 Retrieved evidence also remains untrusted data and may contain indirect prompt
 injection content.
 
@@ -142,7 +150,7 @@ including:
 - workflow automation;
 - human-in-the-loop approval;
 - guardrails;
-- evaluation datasets and automated evaluations;
+- richer external evaluation datasets, semantic entailment/factual correctness evaluators, and optional judge-based evaluation;
 - AI and application observability;
 - OpenTelemetry;
 - metrics and dashboards;

@@ -1,5 +1,15 @@
 """Provider-neutral application services and orchestration helpers."""
 
+from ai_engineering_agent_platform.services.evaluation import (
+    RAGEvaluationCaseExecution,
+    RAGEvaluationRunResult,
+    RAGEvaluationService,
+    RAGRunner,
+)
+from ai_engineering_agent_platform.services.evaluation_mapping import (
+    score_rag_result,
+    summarize_rag_metrics,
+)
 from ai_engineering_agent_platform.services.grounded_generation import (
     GroundedGenerationResult,
     GroundedGenerationService,
@@ -54,7 +64,11 @@ __all__ = [
     "IndexingService",
     "KnowledgeIngestionResult",
     "KnowledgeIngestionService",
+    "RAGEvaluationCaseExecution",
+    "RAGEvaluationRunResult",
+    "RAGEvaluationService",
     "RAGResult",
+    "RAGRunner",
     "RAGService",
     "RerankingService",
     "RetrievalService",
@@ -70,4 +84,6 @@ __all__ = [
     "normalize_knowledge_media_type",
     "ordered_grounding_evidence",
     "parse_knowledge_source",
+    "score_rag_result",
+    "summarize_rag_metrics",
 ]
