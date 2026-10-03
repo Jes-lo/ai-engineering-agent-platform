@@ -428,3 +428,105 @@ def test_vector_store_provider_supports_structural_async_typing() -> None:
             )
         )
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        "0.1",
+        None,
+    ],
+)
+def test_vector_contract_rejects_non_numeric_components(
+    value: object,
+) -> None:
+    """Vector components must be real numeric values, never bool/coerced data."""
+    with pytest.raises(
+        ValueError,
+        match="vector values must be numeric",
+    ):
+        VectorRecord(
+            record_id="record",
+            vector=(value,),  # type: ignore[arg-type]
+        )
+
+
+def test_vector_contract_normalizes_numeric_overflow_failure() -> None:
+    """Extremely large numeric values must fail as contract validation."""
+    with pytest.raises(
+        ValueError,
+        match="vector values must be finite",
+    ):
+        VectorRecord(
+            record_id="record",
+            vector=(10**10000,),
+        )
+
+
+@pytest.mark.parametrize(
+    "top_k",
+    [
+        True,
+        1.5,
+        "5",
+    ],
+)
+def test_vector_query_requires_integer_top_k(
+    top_k: object,
+) -> None:
+    """Nearest-neighbor limits must be real integers."""
+    with pytest.raises(
+        ValueError,
+        match="top_k must be an integer",
+    ):
+        VectorQueryRequest(
+            vector=(0.1, 0.2),
+            top_k=top_k,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "score",
+    [
+        True,
+        "1.0",
+        None,
+    ],
+)
+def test_vector_query_result_requires_numeric_score(
+    score: object,
+) -> None:
+    """Normalized query scores must be real numeric values."""
+    with pytest.raises(
+        ValueError,
+        match="vector query score must be numeric",
+    ):
+        VectorQueryResult(
+            record_id="record",
+            score=score,  # type: ignore[arg-type]
+            rank=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "rank",
+    [
+        True,
+        1.5,
+        "1",
+    ],
+)
+def test_vector_query_result_requires_integer_rank(
+    rank: object,
+) -> None:
+    """Normalized query ranks must be real integers."""
+    with pytest.raises(
+        ValueError,
+        match="rank must be an integer",
+    ):
+        VectorQueryResult(
+            record_id="record",
+            score=1.0,
+            rank=rank,  # type: ignore[arg-type]
+        )

@@ -14,8 +14,20 @@ def _validate_vector(values: tuple[float, ...]) -> None:
     if not values:
         raise ValueError("vector must not be empty")
 
-    if any(not isfinite(value) for value in values):
-        raise ValueError("vector values must be finite")
+    for value in values:
+        if isinstance(value, bool) or not isinstance(
+            value,
+            (int, float),
+        ):
+            raise ValueError("vector values must be numeric")
+
+        try:
+            finite = isfinite(value)
+        except OverflowError as exc:
+            raise ValueError("vector values must be finite") from exc
+
+        if not finite:
+            raise ValueError("vector values must be finite")
 
 
 def _validate_namespace(namespace: str | None) -> None:
@@ -113,6 +125,12 @@ class VectorQueryRequest:
         _validate_vector(self.vector)
         _validate_namespace(self.namespace)
 
+        if isinstance(self.top_k, bool) or not isinstance(
+            self.top_k,
+            int,
+        ):
+            raise ValueError("top_k must be an integer")
+
         if self.top_k <= 0:
             raise ValueError("top_k must be positive")
 
@@ -124,7 +142,12 @@ class VectorQueryRequest:
 
 @dataclass(frozen=True, slots=True)
 class VectorQueryResult:
-    """Normalized nearest-neighbor result."""
+    """Normalized nearest-neighbor result.
+
+    Higher scores represent closer matches. Concrete providers may use
+    different distance functions internally, but must normalize their
+    result ordering to this higher-is-better contract.
+    """
 
     record_id: str
     score: float
@@ -137,8 +160,25 @@ class VectorQueryResult:
         if not self.record_id.strip():
             raise ValueError("record_id must not be empty")
 
-        if not isfinite(self.score):
+        if isinstance(self.score, bool) or not isinstance(
+            self.score,
+            (int, float),
+        ):
+            raise ValueError("vector query score must be numeric")
+
+        try:
+            finite_score = isfinite(self.score)
+        except OverflowError as exc:
+            raise ValueError("vector query score must be finite") from exc
+
+        if not finite_score:
             raise ValueError("vector query score must be finite")
+
+        if isinstance(self.rank, bool) or not isinstance(
+            self.rank,
+            int,
+        ):
+            raise ValueError("rank must be an integer")
 
         if self.rank <= 0:
             raise ValueError("rank must be positive")

@@ -18,8 +18,11 @@ The project currently uses the following direct software dependencies.
 | FastAPI | 0.142.x | HTTP API framework | MIT |
 | Uvicorn | 0.54.x | ASGI application server | BSD-3-Clause |
 | pydantic-settings | 2.15.x | Runtime configuration | MIT |
-| pytest | 9.1.x | Automated testing | MIT |
 | HTTPX2 | 2.13.x | Runtime HTTP client and adapter testing | BSD-3-Clause |
+| Psycopg | 3.3.x with binary extra | PostgreSQL runtime driver | LGPL-3.0-only |
+| psycopg-pool | 3.3.x | Asynchronous PostgreSQL connection pooling | LGPL-3.0-only |
+| Alembic | 1.20.x | PostgreSQL schema migration orchestration | MIT |
+| pytest | 9.1.x | Automated testing | MIT |
 | Ruff | 0.16.x | Formatting and static linting | MIT |
 | mypy | 2.4.x | Static type checking | MIT |
 
@@ -28,6 +31,27 @@ are recorded in `uv.lock`.
 
 Automated SBOM and complete dependency-license inventory generation are
 part of the repository software supply-chain controls.
+
+Alembic resolves SQLAlchemy as a migration dependency. The current resolved
+environment contains SQLAlchemy 2.1.x under the MIT license. Transitive
+dependency versions and licenses remain tracked by `uv.lock`, the automated
+license inventory, and the generated SBOM rather than being duplicated
+exhaustively in this document.
+
+## Database and Vector Infrastructure
+
+The local development and CI persistence environment uses:
+
+| Component | Version / reference | Purpose | License |
+| --- | --- | --- | --- |
+| PostgreSQL | 18.x container base | Relational persistence | PostgreSQL License |
+| pgvector | 0.8.6 | PostgreSQL vector type and distance operations | PostgreSQL License |
+| `pgvector/pgvector` container image | `0.8.6-pg18-trixie`, digest pinned in `compose.yaml` | Reproducible local and CI PostgreSQL + pgvector runtime | Upstream components retain their respective licenses |
+
+The repository does not vendor PostgreSQL or pgvector source code. The
+development container image is referenced by immutable digest and remains a
+third-party artifact subject to its upstream licenses, notices, copyrights,
+and image-distribution terms.
 
 ## External Services and Tooling
 

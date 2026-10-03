@@ -32,8 +32,9 @@ The architecture prioritizes:
 
 ## Current Implementation
 
-The current repository implements foundational platform layers plus concrete
-LLM and embedding runtime integrations through Ollama.
+The current repository implements foundational platform layers, concrete LLM
+and embedding runtime integrations through Ollama, and a PostgreSQL + pgvector
+persistence foundation behind the vector-store contract.
 
 Implemented capabilities currently include:
 
@@ -62,18 +63,35 @@ Implemented capabilities currently include:
   failures;
 - mocked-transport adapter tests that do not require a running model server;
 - an opt-in manual smoke-test procedure for a real local Ollama runtime;
+- PostgreSQL configuration with an explicit asynchronous pool lifecycle;
+- separate bootstrap/migration and least-privilege runtime database roles;
+- an Alembic-managed `ai_platform` schema;
+- pgvector-backed vector persistence;
+- a concrete `PostgreSQLVectorStoreProvider` for upsert, exact L2 query, and
+  scoped delete behavior;
+- ordered JSONB metadata storage;
+- runtime composition that owns the database pool while the adapter remains
+  lifecycle-independent;
+- isolated live PostgreSQL integration validation with ephemeral credentials
+  and Docker state;
 - architectural dependency checks protecting the contracts and domain
   layers;
-- CI/CD and software supply-chain validation.
+- CI/CD and software supply-chain validation, including PostgreSQL integration.
 
 Provider-neutral contracts remain independent of Ollama-specific
 implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
 There is currently no public model-generation or embedding API endpoint,
-streaming model generation, persistent database, production vector store,
-RAG pipeline, agent runtime, executable tool integration, MCP integration,
-workflow runtime, or AI observability backend.
+streaming model generation, complete retrieval/RAG pipeline, agent runtime,
+executable tool integration, MCP integration, workflow runtime, or AI
+observability backend.
+
+PostgreSQL + pgvector persistence and exact vector-store operations are
+implemented, but production concerns such as tenant-aware authorization,
+backup/recovery, high availability, encryption-at-rest policy, retention,
+and approximate-nearest-neighbor indexing are not yet implemented by this
+repository.
 
 ## High-Level Architecture
 
@@ -228,8 +246,12 @@ The current dependency flow is:
     EmbeddingResponse
 
 Embedding implementations remain replaceable behind the provider contract.
-No persistent vector storage, indexing, retrieval, or RAG behavior has been
-introduced yet.
+
+Generated embedding vectors can now be persisted explicitly through the
+separate provider-neutral vector-store contract and PostgreSQL/pgvector
+adapter. Embedding generation does not automatically persist data, and no
+end-to-end ingestion, indexing pipeline, retrieval pipeline, reranking, or
+RAG orchestration has been introduced yet.
 
 ### Knowledge and RAG
 
@@ -393,14 +415,31 @@ information must not be indiscriminately exported to telemetry systems.
 
 ## Data Architecture
 
-Planned persistent data categories include:
+PostgreSQL is the current persistence technology for the implemented vector
+foundation. pgvector provides the vector column type and exact distance
+operations while a provider-neutral application boundary keeps PostgreSQL
+details out of the vector-store contract.
+
+The implemented persistence schema currently contains:
+
+- vector collections keyed by optional namespace;
+- one enforced embedding dimensionality per collection;
+- vector records scoped to a collection;
+- arbitrary non-empty text record identifiers;
+- pgvector embeddings;
+- optional record text;
+- ordered metadata represented as a JSONB array.
+
+The implementation deliberately does not yet contain document, chunk,
+knowledge-source, agent, workflow, evaluation, or audit schemas.
+
+Future persistent data categories may include:
 
 - platform configuration;
 - model metadata;
 - knowledge-base metadata;
 - documents;
 - chunks;
-- vector embeddings;
 - agent definitions;
 - workflow definitions;
 - tool registrations;
@@ -408,11 +447,8 @@ Planned persistent data categories include:
 - evaluation results;
 - audit metadata.
 
-PostgreSQL is the intended primary relational persistence technology.
-
-Vector capabilities are expected to be added through PostgreSQL vector
-support while retaining a replaceable application boundary around
-retrieval storage.
+Vector retrieval storage remains replaceable behind the
+`VectorStoreProvider` boundary.
 
 ## Deployment Evolution
 
@@ -421,11 +457,11 @@ The project will evolve incrementally.
 Early development should favor a reproducible local environment.
 
 The repository already includes a CI/CD and software supply-chain
-validation baseline.
+validation baseline together with a containerized PostgreSQL development and
+integration environment.
 
 Later stages may introduce:
 
-- containers;
 - Kubernetes;
 - infrastructure as code;
 - centralized observability;
