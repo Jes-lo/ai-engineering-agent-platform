@@ -31,8 +31,22 @@ The repository currently includes:
 - normalized provider errors for timeout, transport, HTTP-status, malformed
   JSON, and malformed provider responses;
 - isolated Ollama adapter tests using mocked HTTP transport;
+- PostgreSQL 18 + pgvector 0.8.6 persistence through a pinned local
+  development container image;
+- Alembic-managed PostgreSQL schema migrations;
+- separate bootstrap/migration and least-privilege application database
+  identities;
+- a Psycopg async connection-pool runtime with explicit lifecycle ownership;
+- a concrete `PostgreSQLVectorStoreProvider` implementing vector upsert,
+  exact L2 nearest-neighbor query, and scoped delete operations;
+- provider-neutral higher-is-better vector scores, with PostgreSQL L2
+  distance normalized as `1 / (1 + distance)`;
+- ordered vector metadata persisted as JSONB;
+- reproducible PostgreSQL/pgvector integration validation using an isolated,
+  ephemeral Docker Compose project;
 - automated architectural dependency checks;
-- CI/CD and software supply-chain validation.
+- CI/CD and software supply-chain validation, including a dedicated
+  PostgreSQL integration job.
 
 Current model execution is available through provider runtime boundaries.
 LLM generation uses Ollama's non-streaming `/api/chat` endpoint, while
@@ -43,9 +57,13 @@ Tool calling remains intentionally unsupported by the LLM contract. Non-empty
 provider `tool_calls` are rejected rather than executed or silently
 discarded.
 
-Persistent databases, RAG pipelines, executable tools, agents, MCP
-integrations, workflow execution, and AI observability backends have not yet
-been implemented.
+Persistent vector storage is now implemented behind the provider-neutral
+vector-store contract. The current persistence foundation does not yet provide
+a complete retrieval pipeline or RAG system.
+
+RAG pipelines, ingestion/chunking pipelines, reranking, executable tools,
+agents, MCP integrations, workflow execution, and AI observability backends
+have not yet been implemented.
 
 ## Planned Capabilities
 
@@ -55,9 +73,10 @@ including:
 - additional local and remote model adapters;
 - streaming and richer model-capability handling;
 - additional embedding-provider adapters;
-- PostgreSQL and vector-search persistence;
 - retrieval-augmented generation;
-- retrieval and reranking pipelines;
+- retrieval and reranking pipelines over persisted vectors;
+- production database hardening, backup/recovery, and availability patterns;
+- tenant-aware retrieval authorization and data lifecycle controls;
 - grounded responses and citations;
 - agent execution;
 - authorized tool calling;
@@ -128,6 +147,31 @@ HTTP-client lifecycle management.
 For opt-in real-runtime validation procedures, see
 [Local Ollama Smoke Tests](docs/operations/local-ollama-smoke-test.md).
 
+### PostgreSQL + pgvector Persistence
+
+PostgreSQL persistence is implemented behind the provider-neutral
+`VectorStoreProvider` contract. The concrete adapter uses pgvector for exact
+L2 nearest-neighbor search while keeping PostgreSQL-specific behavior outside
+the contract layer.
+
+The local persistence foundation includes:
+
+- PostgreSQL 18 with pgvector 0.8.6;
+- an image pinned by digest in `compose.yaml`;
+- loopback-only host-port publishing by default;
+- SCRAM authentication;
+- an `ai_platform_admin` bootstrap/migration identity;
+- a separate `ai_platform_runtime` application identity;
+- least-privilege grants for the runtime role;
+- Alembic migrations;
+- external database credentials rather than committed secrets;
+- an async Psycopg pool owned by runtime composition;
+- exact vector search without HNSW or IVFFlat indexes at this stage.
+
+For local setup, migrations, credentials, operational boundaries, and
+integration validation, see
+[PostgreSQL + pgvector Operations](docs/operations/postgres-vector-store.md).
+
 ## Continuous Integration
 
 GitHub Actions validates pull requests and pushes to `main`.
@@ -141,6 +185,8 @@ The current CI baseline includes:
 - strict static type checking;
 - automated tests with warnings treated as errors;
 - package build validation;
+- isolated PostgreSQL + pgvector provisioning, migration, and live
+  vector-provider integration;
 - Git history and working-tree secret scanning;
 - dependency vulnerability auditing;
 - dependency-license inventory;

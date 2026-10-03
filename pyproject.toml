@@ -6,8 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = "LicenseRef-Proprietary"
 dependencies = [
+    "alembic>=1.20.0,<1.21",
     "fastapi>=0.142.2,<0.143",
     "httpx2>=2.13.1,<2.14",
+    "psycopg-pool>=3.3.3,<3.4",
+    "psycopg[binary]>=3.3.6,<3.4",
     "pydantic-settings>=2.15.0,<2.16",
     "uvicorn>=0.54.0,<0.55",
 ]

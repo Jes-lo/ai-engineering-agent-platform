@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.3
+Version: 0.4
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -389,6 +389,50 @@ Model output remains untrusted data. Successful model generation does not
 authorize tool execution, command execution, privileged actions, or access to
 protected resources.
 
+## Current PostgreSQL Persistence Security Posture
+
+The platform-to-database trust boundary is now active through the PostgreSQL
+runtime and `PostgreSQLVectorStoreProvider`.
+
+Current controls include:
+
+- PostgreSQL exposed to the local host through loopback by default;
+- PostgreSQL host and local authentication initialized with SCRAM-SHA-256;
+- database bootstrap/migration credentials kept separate from application
+  runtime credentials;
+- an application role fixed to `ai_platform_runtime`;
+- `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT`,
+  `NOREPLICATION`, and `NOBYPASSRLS` on the runtime role;
+- a bounded runtime-role connection limit;
+- no database-level `CREATE` privilege for the runtime role;
+- schema `USAGE` without schema `CREATE`;
+- table privileges limited to operations required by the current vector
+  adapter;
+- schema and table ownership retained by the bootstrap/migration identity;
+- PostgreSQL credentials excluded from source control and local development
+  secrets stored outside the repository;
+- placeholder-only repository configuration examples;
+- Alembic migrations executed separately from the application runtime;
+- parameterized Psycopg SQL for dynamic values;
+- `Jsonb` adaptation for metadata rather than interpolated JSON SQL;
+- database constraints enforcing collection dimensionality and record shape;
+- one namespace entry for `NULL` through `UNIQUE NULLS NOT DISTINCT`;
+- exact L2 vector search without HNSW or IVFFlat indexes at this stage;
+- normalized database failures at the provider boundary;
+- runtime-owned connection-pool lifecycle;
+- isolated PostgreSQL integration tests using synthetic data and ephemeral
+  credentials;
+- cleanup validation proving the isolated integration database returns to a
+  pristine application-data state;
+- validation proving the integration environment does not mutate the normal
+  development database;
+- a dedicated PostgreSQL integration CI job requiring no repository database
+  secrets.
+
+The local Docker configuration and external development secret files are
+development mechanisms, not a production secret-management, backup, high
+availability, encryption, or disaster-recovery design.
+
 ## Current Limitations
 
 The repository now contains concrete Ollama LLM and embedding adapters with
@@ -411,15 +455,37 @@ The current Ollama runtime does not implement:
 - per-user or per-tenant model authorization;
 - AI-specific telemetry or model-operation tracing.
 
-There is still no persistent database, production vector-store integration,
-embedding index, retrieval pipeline, RAG pipeline, agent runtime, MCP
-integration, or workflow runtime. Embeddings are generated in memory and are
-not persisted by this feature.
+The repository now has PostgreSQL + pgvector persistence and a concrete
+vector-store provider supporting upsert, exact L2 nearest-neighbor query, and
+scoped delete operations.
 
-AI-specific attack surfaces associated with retrieval, tools, agents, MCP,
-workflows, and observability therefore remain anticipatory. Controls for
-those attack surfaces must become executable and testable as the
-corresponding runtime capabilities are introduced.
+Embedding generation remains a separate capability: embeddings are not
+automatically persisted unless a caller explicitly passes vector records to
+the vector-store provider.
+
+The current persistence capability does not yet implement:
+
+- document or knowledge-source ingestion;
+- chunking;
+- automatic embedding-to-vector-store orchestration;
+- a retrieval application service or public retrieval API;
+- reranking;
+- complete RAG orchestration;
+- per-user or per-tenant retrieval authorization;
+- row-level tenant isolation;
+- data-retention or deletion-policy orchestration;
+- production backup and recovery;
+- database high availability;
+- repository-defined encryption-at-rest controls;
+- approximate-nearest-neighbor indexes;
+- agent runtime;
+- MCP integration;
+- workflow runtime.
+
+Retrieval, tools, agents, MCP, workflows, and observability therefore remain
+partially or wholly anticipatory attack surfaces. Controls for those surfaces
+must become executable and testable as the corresponding runtime capabilities
+are introduced.
 
 Each future feature must update this threat model when it materially
 changes:
