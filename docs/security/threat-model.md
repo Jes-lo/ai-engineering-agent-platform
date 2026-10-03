@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.9
+Version: 1.0
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -184,6 +184,39 @@ through another path.
 
 Approval requirements must be enforced by application policy rather than
 only described in prompts.
+
+### Current Controlled Tool Execution Foundation
+
+The platform now has an application-owned tool execution control layer.
+
+Current controls include:
+
+- tool providers must identify as tool providers;
+- provider identities must be unique inside one registry;
+- registered tool names must be globally unique;
+- every registered tool requires explicit policy coverage;
+- unknown policy entries fail closed;
+- disabled tools cannot execute;
+- every execution requires an explicit tool allowlist;
+- approval-required tools require an exact structural grant bound to
+  `call_id` and `tool_name`;
+- required and unexpected arguments are validated before provider execution;
+- portable scalar argument types are checked without coercion;
+- provider results must retain the exact invocation `call_id` and
+  `tool_name`;
+- provider failures are propagated rather than silently retried;
+- this layer provides no shell, filesystem, or network tool implementation.
+
+The current approval grant is not a complete human-in-the-loop security
+mechanism. It has no authenticated approver identity, persistence, signature,
+expiry, revocation, or single-use consumption semantics.
+
+The LLM contract also remains separated from executable tools. Non-empty
+Ollama `tool_calls` continue to fail closed, so model output cannot currently
+bypass the application-owned tool policy layer.
+
+Agent loops, MCP integration, workflows, n8n integration, richer authorization
+scopes, and full human-approval lifecycle controls remain future work.
 
 ### MCP Trust Failure
 
@@ -595,7 +628,7 @@ runtime layers.
 The current Ollama runtime does not implement:
 
 - streaming model responses;
-- LLM tool-calling semantics or tool execution;
+- LLM tool-calling semantics or agent-driven tool selection;
 - automatic retries;
 - provider authentication;
 - model routing;
