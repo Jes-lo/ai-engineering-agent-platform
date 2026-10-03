@@ -68,4 +68,7 @@ class OllamaLLMProvider:
         except ValueError as exc:
             raise ProviderExecutionError("Ollama response was not valid JSON") from exc
 
-        return parse_ollama_chat_response(payload)
+        return parse_ollama_chat_response(
+            payload,
+            requested_tools=request.tools,
+        )

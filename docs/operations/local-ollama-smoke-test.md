@@ -189,8 +189,12 @@ This smoke test must not:
 - invoke agents;
 - alter repository configuration merely to make the test succeed.
 
-The current LLM contract does not support tool calling. Provider responses
-containing non-empty `tool_calls` are rejected.
+Tool-capable Ollama responses now have a narrower boundary. When the request
+explicitly exposes matching tool definitions, non-empty `tool_calls` are
+normalized into inert `LLMToolCall` proposals and are not executed. A
+response proposing a tool that was not explicitly requested still fails
+closed. This smoke-test document does not claim deterministic tool selection
+for every local model or implement an agent/tool-result round trip.
 
 ## Validation Record
 
