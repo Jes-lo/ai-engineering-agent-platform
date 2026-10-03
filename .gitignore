@@ -1,0 +1,87 @@
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs
+*.log
+logs/
+
+# Local data
+data/
+tmp/
+temp/
+
+# PostgreSQL / database local state
+postgres-data/
+
+# Vector / AI local artifacts
+models/
+model-cache/
+ollama-data/
+embeddings-cache/
+
+# Node.js / frontend
+node_modules/
+.next/
+dist/
+coverage/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+
+# Kubernetes / Helm local generated files
+*.kubeconfig
+
+# Secrets and credentials
+credentials/
+secrets/
+
+# Local observability data
+prometheus-data/
+grafana-data/
+langfuse-data/
+
+# Test / runtime artifacts
+artifacts/
+reports/
