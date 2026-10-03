@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.0
+Version: 1.1
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -211,12 +211,42 @@ The current approval grant is not a complete human-in-the-loop security
 mechanism. It has no authenticated approver identity, persistence, signature,
 expiry, revocation, or single-use consumption semantics.
 
-The LLM contract also remains separated from executable tools. Non-empty
-Ollama `tool_calls` continue to fail closed, so model output cannot currently
-bypass the application-owned tool policy layer.
+Ollama `tool_calls` are now accepted only as untrusted proposals when the
+request explicitly exposed the matching tool name. An unrequested tool name
+fails closed. A parsed proposal remains separate from `ToolInvocation`,
+`ToolExecutionAuthorization`, approval state, and `ToolExecutionService`, so
+model output cannot directly acquire execution authority.
 
 Agent loops, MCP integration, workflows, n8n integration, richer authorization
 scopes, and full human-approval lifecycle controls remain future work.
+
+### LLM Tool-Call Proposal Threat Boundary
+
+LLM tool proposals are untrusted model output.
+
+Current controls are:
+
+- only tool definitions explicitly supplied in `LLMRequest.tools` are exposed
+  to Ollama;
+- request tool names must be unique;
+- a response proposing a tool outside that request set fails closed;
+- Ollama tool-call arguments must be JSON objects containing only portable
+  scalar values;
+- provider tool-call identifiers are optional metadata and do not become
+  platform execution identifiers;
+- proposals normalize to immutable `LLMToolCall` values;
+- tool proposals require `FinishReason.TOOL_CALLS`;
+- proposal parsing never invokes `ToolExecutionService`;
+- Feature 11 registration, allowlist, approval, argument validation, and
+  result-identity controls remain unchanged;
+- grounded generation remains STOP-only and therefore rejects tool-call
+  proposal responses.
+
+This feature does not establish a complete agent security boundary. It does
+not create controlled `ToolInvocation` values from model output, return tool
+results to the model, add `MessageRole.TOOL`, implement an agent loop,
+provide authenticated HITL approval lifecycle semantics, connect MCP,
+execute workflows, integrate n8n, or add shell/filesystem/network tools.
 
 ### MCP Trust Failure
 
@@ -396,8 +426,8 @@ Current controls include:
 - normalized HTTP-status failures;
 - provider response validation before conversion to platform domain models;
 - rejection of malformed JSON and malformed response structures;
-- rejection of non-empty Ollama `tool_calls` while platform LLM tool calling
-  remains unsupported;
+- requested-tool validation and inert normalization of non-empty Ollama
+  `tool_calls`, with execution authority remaining outside the LLM adapter;
 - preservation of underlying exception causes without copying remote response
   bodies into normalized platform-error messages;
 - runtime-owned HTTP-client creation and cleanup;
@@ -628,7 +658,8 @@ runtime layers.
 The current Ollama runtime does not implement:
 
 - streaming model responses;
-- LLM tool-calling semantics or agent-driven tool selection;
+- agent-driven conversion of accepted LLM proposals into controlled tool
+  invocations and tool-result conversation round trips;
 - automatic retries;
 - provider authentication;
 - model routing;

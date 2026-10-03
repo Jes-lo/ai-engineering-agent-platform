@@ -2,6 +2,10 @@
 
 from typing import cast
 
+from ai_engineering_agent_platform.adapters.ollama.tool_mapping import (
+    build_ollama_tools,
+    parse_ollama_tool_calls,
+)
 from ai_engineering_agent_platform.contracts import (
     FinishReason,
     LLMMessage,
@@ -9,6 +13,7 @@ from ai_engineering_agent_platform.contracts import (
     LLMResponse,
     MessageRole,
     TokenUsage,
+    ToolDefinition,
 )
 from ai_engineering_agent_platform.domain import ProviderExecutionError
 
@@ -33,6 +38,9 @@ def build_ollama_chat_payload(
         "stream": False,
     }
 
+    if request.tools:
+        payload["tools"] = build_ollama_tools(request.tools)
+
     options: JsonObject = {}
 
     if request.temperature is not None:
@@ -49,6 +57,8 @@ def build_ollama_chat_payload(
 
 def parse_ollama_chat_response(
     payload: object,
+    *,
+    requested_tools: tuple[ToolDefinition, ...] = (),
 ) -> LLMResponse:
     """Parse one completed non-streaming Ollama chat response."""
     response = _require_object(
@@ -82,9 +92,16 @@ def parse_ollama_chat_response(
     if not isinstance(content, str):
         raise ProviderExecutionError("Ollama response message.content must be a string")
 
-    _reject_unsupported_tool_calls(message_payload)
+    tool_calls = parse_ollama_tool_calls(
+        message_payload,
+        requested_tools=requested_tools,
+    )
 
-    finish_reason = _parse_finish_reason(response.get("done_reason"))
+    finish_reason = (
+        FinishReason.TOOL_CALLS
+        if tool_calls
+        else _parse_finish_reason(response.get("done_reason"))
+    )
 
     usage = _parse_usage(response)
 
@@ -96,6 +113,7 @@ def parse_ollama_chat_response(
         ),
         finish_reason=finish_reason,
         usage=usage,
+        tool_calls=tool_calls,
     )
 
 
@@ -190,21 +208,3 @@ def _require_non_negative_integer(
         )
 
     return value
-
-
-def _reject_unsupported_tool_calls(
-    message: JsonObject,
-) -> None:
-    """Reject tool calls until the platform models them explicitly."""
-    tool_calls = message.get("tool_calls")
-
-    if tool_calls is None:
-        return
-
-    if not isinstance(tool_calls, list):
-        raise ProviderExecutionError(
-            "Ollama response message.tool_calls must be a list"
-        )
-
-    if tool_calls:
-        raise ProviderExecutionError("Ollama response contains unsupported tool calls")

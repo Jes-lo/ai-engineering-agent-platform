@@ -84,9 +84,13 @@ LLM generation uses Ollama's non-streaming `/api/chat` endpoint, while
 embedding generation uses `/api/embed`. The FastAPI application does not yet
 expose public model-generation, embedding, or retrieval endpoints.
 
-Tool calling remains intentionally unsupported by the LLM contract. Non-empty
-provider `tool_calls` are rejected rather than executed or silently
-discarded.
+The provider-neutral LLM contract now supports explicit tool definitions and
+inert tool-call proposals. `LLMRequest.tools` exposes unique
+`ToolDefinition` values to a provider, while `LLMResponse.tool_calls`
+contains immutable `LLMToolCall` proposals and uses
+`FinishReason.TOOL_CALLS` when proposals are present. A proposal is
+untrusted model output: it is not a `ToolInvocation`, does not carry platform
+execution authority, and cannot execute a tool by itself.
 
 ## Controlled Tool Execution Foundation
 
@@ -110,10 +114,15 @@ The current `ToolApprovalGrant` is structural approval evidence only. It is
 not yet an identity-bound, persistent, signed, expiring, or single-use
 human-in-the-loop approval system.
 
-LLM tool calling remains intentionally separate. Ollama responses containing
-non-empty `tool_calls` are still rejected, and this feature does not add an
-agent loop, MCP integration, workflow execution, n8n, shell execution,
-filesystem tools, or network tools.
+LLM proposal parsing and controlled tool execution remain intentionally
+separate. Ollama non-empty `tool_calls` are normalized only when the request
+explicitly exposed the proposed tool name. Unrequested tool names fail
+closed. Parsing produces inert `LLMToolCall` values and never invokes
+`ToolExecutionService`, grants approval, creates a controlled
+`ToolInvocation`, or bypasses the Feature 11 execution policy. Agent loops,
+tool-result round trips, a `MessageRole.TOOL` conversation role, MCP,
+workflows, n8n, shell execution, filesystem tools, and network tools remain
+outside this feature.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
@@ -172,7 +181,8 @@ including:
 - presentation-layer citation rendering and automated semantic
   groundedness/citation-quality evaluation;
 - agent execution;
-- LLM tool-call parsing and model-driven tool selection;
+- agent orchestration that converts accepted LLM tool-call proposals into
+  controlled `ToolInvocation` values and returns tool results to the model;
 - MCP integrations and a project-owned MCP server;
 - workflow automation;
 - human-in-the-loop approval;

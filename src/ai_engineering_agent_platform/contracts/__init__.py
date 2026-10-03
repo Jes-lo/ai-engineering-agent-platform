@@ -12,6 +12,7 @@ from ai_engineering_agent_platform.contracts.llm import (
     LLMProvider,
     LLMRequest,
     LLMResponse,
+    LLMToolCall,
     MessageRole,
     TokenUsage,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "LLMProvider",
     "LLMRequest",
     "LLMResponse",
+    "LLMToolCall",
     "MessageRole",
     "Provider",
     "ProviderDescriptor",

@@ -57,7 +57,7 @@ Implemented capabilities currently include:
 - explicit embedding `truncate=false` requests to reject oversized inputs
   rather than silently truncating them;
 - normalized finish reasons and token-usage metadata;
-- explicit rejection of unsupported Ollama tool calls;
+- explicit requested-tool validation for Ollama tool-call proposals;
 - validated Ollama base-URL and timeout configuration;
 - shared Ollama HTTP-client construction plus capability-specific runtime
   composition, provider construction, and deterministic cleanup;
@@ -117,7 +117,7 @@ boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
 endpoint, streaming model generation, concrete reranker adapter, agent runtime,
-LLM-driven tool-call parsing, MCP integration, workflow runtime, or AI
+agent-loop tool execution, MCP integration, workflow runtime, or AI
 observability backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
@@ -408,6 +408,33 @@ Agent behavior may include:
 
 Agents must not receive unrestricted platform permissions by default.
 
+### LLM Tool-Call Proposal Boundary
+
+`LLMRequest` may now include a tuple of provider-neutral `ToolDefinition`
+values. Tool names must be unique inside one request.
+
+For Ollama, those definitions are mapped to `/api/chat` function-tool
+schemas. A completed response containing `message.tool_calls` is treated as
+untrusted provider output and is normalized only when every proposed tool
+name belongs to the tool set explicitly exposed by that request.
+
+Normalized proposals use `LLMToolCall`. They contain the proposed tool name,
+portable scalar `ToolArgument` values, and an optional provider-originating
+`provider_call_id`. That provider identifier is metadata only; it is not the
+platform-controlled `ToolInvocation.call_id`.
+
+Responses with one or more proposals use `FinishReason.TOOL_CALLS`. A
+`TOOL_CALLS` response without proposals, or a response containing proposals
+under another finish reason, is invalid at the provider-neutral contract
+boundary.
+
+The proposal layer deliberately performs no execution. It does not create a
+`ToolInvocation`, call `ToolExecutionService`, grant authorization or
+approval, or return tool results to the model. There is not yet a
+`MessageRole.TOOL` role or agent loop. Existing non-agentic grounded
+generation continues to accept only `FinishReason.STOP`, so tool proposals
+fail closed there.
+
 ### Tool Registry
 
 Tools are explicit platform resources behind provider-neutral contracts.
@@ -435,11 +462,14 @@ The current approval grant is deliberately structural: it binds exact
 human identity, persistence, signatures, expiry, revocation, or single-use
 consumption.
 
-This layer does not parse LLM tool calls and does not implement an agent loop,
-MCP discovery, workflow execution, n8n integration, shell execution,
-filesystem tools, network tools, or automatic retries. Ollama non-empty
-`tool_calls` therefore remain rejected until later model/tool orchestration is
-implemented on top of these controls.
+The controlled execution layer itself still does not parse model output.
+The LLM/Ollama adapter now exposes explicitly supplied `ToolDefinition`
+values and can normalize matching Ollama `tool_calls` into inert
+`LLMToolCall` proposals. Those proposals do not create execution identity,
+do not satisfy approval, and do not call `ToolExecutionService`. Agent-loop
+orchestration, tool-result round trips, MCP discovery, workflow execution,
+n8n integration, shell execution, filesystem tools, network tools, and
+automatic retries remain separate future capabilities.
 
 ### MCP
 
