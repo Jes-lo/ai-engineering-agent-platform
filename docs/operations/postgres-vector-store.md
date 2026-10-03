@@ -179,18 +179,60 @@ Do not use destructive migration commands against data that must be retained.
 
 ## Vector Storage Semantics
 
-Collections are scoped by optional namespace.
+Collections are scoped by two independent identities:
+
+- optional `namespace`, which is the logical data partition;
+- required `space_id`, which identifies the vector/embedding space.
 
 The schema enforces:
 
-- one collection per namespace, including one `NULL` default namespace;
+- one collection per `(namespace, space_id)` combination, with `NULL`
+  namespaces compared using `UNIQUE NULLS NOT DISTINCT`;
+- non-empty `space_id`;
 - dimensions between 1 and 16000;
-- one embedding dimensionality per collection;
+- one embedding dimensionality per vector space;
 - non-empty record identifiers;
 - generated dimensions matching the stored pgvector value;
 - ordered metadata represented as a JSONB array.
 
-The same `record_id` may exist in different namespaces.
+The same namespace may therefore contain multiple isolated embedding spaces of
+the same dimensionality. Query and delete operations must provide the same
+`space_id` used for indexing, and a request for another or missing space does
+not fall back to a collection merely because namespace and dimensions match.
+
+The same `record_id` may exist in different namespaces or different
+`space_id` values.
+
+Indexing and retrieval services default `space_id` to their configured
+embedding model. They also reject an `EmbeddingResponse` whose reported model
+does not match the requested model before any vector upsert or query occurs.
+
+A custom `space_id` may represent a stricter model revision or artifact
+identity. The platform does not currently resolve or validate a revision or
+digest automatically.
+
+### Migration 0002
+
+`0002_embedding_space_isolation` changes collection identity from namespace
+alone to `(namespace, space_id)`.
+
+Collections created before this migration are assigned:
+
+    legacy-unidentified
+
+This value deliberately means that the embedding-space provenance is unknown.
+It does not assert that those vectors came from the currently configured
+embedding model.
+
+Legacy vectors should be re-embedded and reindexed into a known `space_id`
+before they are used as part of an identified embedding space. Do not simply
+rename `legacy-unidentified` to a model identifier unless provenance has been
+independently established.
+
+Downgrade from `0002` to `0001` is fail-closed when more than one vector space
+exists for the same namespace, because collapsing those collections into the
+old namespace-only identity would be lossy. A lossless downgrade remains
+possible after such conflicts have been removed.
 
 ## Query Semantics
 
@@ -224,7 +266,10 @@ The integration runner:
 - creates an ephemeral database volume;
 - provisions the runtime role;
 - applies Alembic migrations;
-- executes the live vector-provider integration test;
+- executes the live vector-provider integration tests, including
+  same-namespace embedding-space isolation;
+- resolves the repository's single current Alembic head instead of
+  hardcoding one migration revision;
 - verifies final database invariants;
 - removes the integration container and volume.
 

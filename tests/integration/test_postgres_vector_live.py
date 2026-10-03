@@ -154,6 +154,7 @@ async def _exercise_live_provider() -> None:
 
             missing = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     namespace="integration-missing",
                     vector=(
                         1.0,
@@ -191,6 +192,7 @@ async def _exercise_live_provider() -> None:
 
             await provider.upsert(
                 VectorUpsertRequest(
+                    space_id="test-space",
                     records=(
                         VectorRecord(
                             record_id="shared-id",
@@ -220,12 +222,13 @@ async def _exercise_live_provider() -> None:
                             ),
                             text="default far",
                         ),
-                    )
+                    ),
                 )
             )
 
             await provider.upsert(
                 VectorUpsertRequest(
+                    space_id="test-space",
                     namespace="integration-named",
                     records=(
                         VectorRecord(
@@ -243,6 +246,7 @@ async def _exercise_live_provider() -> None:
 
             result = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(
                         1.0,
                         0.0,
@@ -274,6 +278,7 @@ async def _exercise_live_provider() -> None:
 
             named = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     namespace="integration-named",
                     vector=(
                         1.0,
@@ -301,6 +306,7 @@ async def _exercise_live_provider() -> None:
 
             await provider.upsert(
                 VectorUpsertRequest(
+                    space_id="test-space",
                     records=(
                         VectorRecord(
                             record_id="shared-id",
@@ -312,12 +318,13 @@ async def _exercise_live_provider() -> None:
                             text="default updated",
                             metadata=updated_metadata,
                         ),
-                    )
+                    ),
                 )
             )
 
             updated_result = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(
                         1.0,
                         0.0,
@@ -343,6 +350,7 @@ async def _exercise_live_provider() -> None:
             await _expect_execution_error(
                 provider.upsert(
                     VectorUpsertRequest(
+                        space_id="test-space",
                         records=(
                             VectorRecord(
                                 record_id=("wrong-dimensions"),
@@ -351,7 +359,7 @@ async def _exercise_live_provider() -> None:
                                     2.0,
                                 ),
                             ),
-                        )
+                        ),
                     )
                 )
             )
@@ -359,6 +367,7 @@ async def _exercise_live_provider() -> None:
             await _expect_execution_error(
                 provider.query(
                     VectorQueryRequest(
+                        space_id="test-space",
                         vector=(
                             1.0,
                             2.0,
@@ -370,6 +379,7 @@ async def _exercise_live_provider() -> None:
 
             await provider.delete(
                 VectorDeleteRequest(
+                    space_id="test-space",
                     record_ids=(
                         "near",
                         "does-not-exist",
@@ -379,12 +389,14 @@ async def _exercise_live_provider() -> None:
 
             await provider.delete(
                 VectorDeleteRequest(
+                    space_id="test-space",
                     record_ids=("near",),
                 )
             )
 
             after_delete = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     vector=(
                         1.0,
                         0.0,
@@ -401,6 +413,7 @@ async def _exercise_live_provider() -> None:
 
             named_after_delete = await provider.query(
                 VectorQueryRequest(
+                    space_id="test-space",
                     namespace=("integration-named"),
                     vector=(
                         1.0,
@@ -417,6 +430,7 @@ async def _exercise_live_provider() -> None:
 
             await provider.delete(
                 VectorDeleteRequest(
+                    space_id="test-space",
                     record_ids=(
                         "shared-id",
                         "far",
@@ -426,6 +440,7 @@ async def _exercise_live_provider() -> None:
 
             await provider.delete(
                 VectorDeleteRequest(
+                    space_id="test-space",
                     namespace="integration-named",
                     record_ids=("shared-id",),
                 )
@@ -459,3 +474,261 @@ async def _exercise_live_provider() -> None:
 def test_live_postgres_vector_provider() -> None:
     """Exercise the real provider against PostgreSQL + pgvector."""
     asyncio.run(_exercise_live_provider())
+
+
+async def _exercise_live_vector_space_isolation() -> None:
+    """Prove equal-dimensional spaces remain isolated inside one namespace."""
+    runtime_path = Path(os.environ["AI_PLATFORM_POSTGRES_INTEGRATION_RUNTIME_ENV"])
+    bootstrap_path = Path(os.environ["AI_PLATFORM_POSTGRES_INTEGRATION_BOOTSTRAP_ENV"])
+
+    runtime = _load_env(
+        runtime_path,
+        RUNTIME_KEYS,
+    )
+    bootstrap = _load_env(
+        bootstrap_path,
+        BOOTSTRAP_KEYS,
+    )
+
+    os.environ.update(runtime)
+
+    settings = Settings()
+
+    if settings.postgres_user != "ai_platform_runtime":
+        raise RuntimeError("Integration test must use runtime role")
+
+    namespace = "integration-space-isolation"
+    space_a = "synthetic-model-a"
+    space_b = "synthetic-model-b"
+    missing_space = "synthetic-model-missing"
+
+    try:
+        async with postgres_pool_runtime(settings) as pool:
+            provider = PostgreSQLVectorStoreProvider(pool)
+
+            await provider.upsert(
+                VectorUpsertRequest(
+                    namespace=namespace,
+                    space_id=space_a,
+                    records=(
+                        VectorRecord(
+                            record_id="shared-id",
+                            vector=(
+                                1.0,
+                                0.0,
+                                0.0,
+                            ),
+                            text="space-a",
+                        ),
+                    ),
+                )
+            )
+
+            await provider.upsert(
+                VectorUpsertRequest(
+                    namespace=namespace,
+                    space_id=space_b,
+                    records=(
+                        VectorRecord(
+                            record_id="shared-id",
+                            vector=(
+                                0.0,
+                                1.0,
+                                0.0,
+                            ),
+                            text="space-b",
+                        ),
+                    ),
+                )
+            )
+
+            result_a = await provider.query(
+                VectorQueryRequest(
+                    namespace=namespace,
+                    space_id=space_a,
+                    vector=(
+                        1.0,
+                        0.0,
+                        0.0,
+                    ),
+                    top_k=1,
+                )
+            )
+
+            result_b = await provider.query(
+                VectorQueryRequest(
+                    namespace=namespace,
+                    space_id=space_b,
+                    vector=(
+                        0.0,
+                        1.0,
+                        0.0,
+                    ),
+                    top_k=1,
+                )
+            )
+
+            missing = await provider.query(
+                VectorQueryRequest(
+                    namespace=namespace,
+                    space_id=missing_space,
+                    vector=(
+                        1.0,
+                        0.0,
+                        0.0,
+                    ),
+                    top_k=1,
+                )
+            )
+
+            assert len(result_a.results) == 1
+            assert len(result_b.results) == 1
+            assert missing.results == ()
+
+            assert result_a.results[0].record_id == "shared-id"
+            assert result_a.results[0].text == "space-a"
+            assert result_a.results[0].score == 1.0
+
+            assert result_b.results[0].record_id == "shared-id"
+            assert result_b.results[0].text == "space-b"
+            assert result_b.results[0].score == 1.0
+
+            await _expect_execution_error(
+                provider.upsert(
+                    VectorUpsertRequest(
+                        namespace=namespace,
+                        space_id=space_a,
+                        records=(
+                            VectorRecord(
+                                record_id="wrong-dimensions",
+                                vector=(
+                                    1.0,
+                                    0.0,
+                                ),
+                            ),
+                        ),
+                    )
+                )
+            )
+
+            await _expect_execution_error(
+                provider.query(
+                    VectorQueryRequest(
+                        namespace=namespace,
+                        space_id=space_a,
+                        vector=(
+                            1.0,
+                            0.0,
+                        ),
+                        top_k=1,
+                    )
+                )
+            )
+
+            await provider.delete(
+                VectorDeleteRequest(
+                    namespace=namespace,
+                    space_id=space_a,
+                    record_ids=("shared-id",),
+                )
+            )
+
+            after_delete_a = await provider.query(
+                VectorQueryRequest(
+                    namespace=namespace,
+                    space_id=space_a,
+                    vector=(
+                        1.0,
+                        0.0,
+                        0.0,
+                    ),
+                    top_k=1,
+                )
+            )
+
+            after_delete_b = await provider.query(
+                VectorQueryRequest(
+                    namespace=namespace,
+                    space_id=space_b,
+                    vector=(
+                        0.0,
+                        1.0,
+                        0.0,
+                    ),
+                    top_k=1,
+                )
+            )
+
+            assert after_delete_a.results == ()
+            assert len(after_delete_b.results) == 1
+            assert after_delete_b.results[0].text == "space-b"
+
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    """
+                    SELECT
+                        c.space_id,
+                        c.dimensions,
+                        count(r.record_id)
+                    FROM ai_platform.vector_collections AS c
+                    LEFT JOIN ai_platform.vector_records AS r
+                      ON r.collection_id = c.collection_id
+                    WHERE c.namespace = %s
+                    GROUP BY
+                        c.collection_id,
+                        c.space_id,
+                        c.dimensions
+                    ORDER BY c.space_id
+                    """,
+                    (namespace,),
+                )
+
+                rows = await cursor.fetchall()
+
+                assert rows == [
+                    (
+                        space_a,
+                        3,
+                        0,
+                    ),
+                    (
+                        space_b,
+                        3,
+                        1,
+                    ),
+                ]
+
+                cursor = await connection.execute(
+                    """
+                    SELECT count(*)
+                    FROM ai_platform.vector_collections
+                    WHERE namespace = %s
+                      AND space_id = %s
+                    """,
+                    (
+                        namespace,
+                        missing_space,
+                    ),
+                )
+
+                missing_count = await cursor.fetchone()
+
+                assert missing_count == (0,)
+
+            await provider.delete(
+                VectorDeleteRequest(
+                    namespace=namespace,
+                    space_id=space_b,
+                    record_ids=("shared-id",),
+                )
+            )
+    finally:
+        await _cleanup(
+            runtime=runtime,
+            bootstrap=bootstrap,
+        )
+
+
+def test_live_postgres_vector_space_isolation() -> None:
+    """Same namespace and dimensions must remain isolated by space_id."""
+    asyncio.run(_exercise_live_vector_space_isolation())

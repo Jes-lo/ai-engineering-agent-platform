@@ -36,6 +36,15 @@ def _validate_namespace(namespace: str | None) -> None:
         raise ValueError("namespace must not be empty")
 
 
+def _validate_space_id(space_id: str) -> None:
+    """Validate one provider-neutral vector-space identity."""
+    if not isinstance(space_id, str):
+        raise ValueError("space_id must be a string")
+
+    if not space_id.strip():
+        raise ValueError("space_id must not be empty")
+
+
 @dataclass(frozen=True, slots=True)
 class VectorMetadataItem:
     """Immutable metadata key/value pair."""
@@ -87,6 +96,7 @@ class VectorUpsertRequest:
     """Immutable request for inserting or replacing vector records."""
 
     records: tuple[VectorRecord, ...]
+    space_id: str
     namespace: str | None = None
 
     def __post_init__(self) -> None:
@@ -94,6 +104,7 @@ class VectorUpsertRequest:
         if not self.records:
             raise ValueError("records must not be empty")
 
+        _validate_space_id(self.space_id)
         _validate_namespace(self.namespace)
 
         record_ids = [record.record_id for record in self.records]
@@ -118,11 +129,13 @@ class VectorQueryRequest:
 
     vector: tuple[float, ...]
     top_k: int
+    space_id: str
     namespace: str | None = None
 
     def __post_init__(self) -> None:
         """Validate vector query invariants."""
         _validate_vector(self.vector)
+        _validate_space_id(self.space_id)
         _validate_namespace(self.namespace)
 
         if isinstance(self.top_k, bool) or not isinstance(
@@ -218,6 +231,7 @@ class VectorDeleteRequest:
     """Immutable request for deleting vector records."""
 
     record_ids: tuple[str, ...]
+    space_id: str
     namespace: str | None = None
 
     def __post_init__(self) -> None:
@@ -225,6 +239,7 @@ class VectorDeleteRequest:
         if not self.record_ids:
             raise ValueError("record_ids must not be empty")
 
+        _validate_space_id(self.space_id)
         _validate_namespace(self.namespace)
 
         if any(not record_id.strip() for record_id in self.record_ids):

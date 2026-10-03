@@ -139,6 +139,7 @@ def test_vector_upsert_preserves_record_order_and_vectors() -> None:
     )
 
     assert request.namespace == "synthetic"
+    assert request.space_id == "synthetic-embedding-model"
 
     assert tuple(record.record_id for record in request.records) == (
         "doc-1:chunk:0:0:5",

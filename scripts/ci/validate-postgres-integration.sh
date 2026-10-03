@@ -250,6 +250,31 @@ echo "PASS: live provider integration"
 echo
 echo "===== FINAL DATABASE INVARIANTS ====="
 
+ALEMBIC_HEADS="$(
+  uv run alembic heads
+)"
+
+ALEMBIC_HEAD_COUNT="$(
+  printf '%s\n' "$ALEMBIC_HEADS"     | grep -c '(head)'
+)"
+
+if [[ "$ALEMBIC_HEAD_COUNT" -ne 1 ]]; then
+  echo "FAIL: expected exactly one Alembic head"
+  printf '%s\n' "$ALEMBIC_HEADS"
+  exit 1
+fi
+
+EXPECTED_REVISION="$(
+  printf '%s\n' "$ALEMBIC_HEADS"     | awk '/\(head\)$/ {print $1}'
+)"
+
+[[ -n "$EXPECTED_REVISION" ]] || {
+  echo "FAIL: unable to resolve Alembic head revision"
+  exit 1
+}
+
+echo "expected_revision=$EXPECTED_REVISION"
+
 FINAL_STATE="$(
   HOME="$CI_HOME" \
   AI_PLATFORM_POSTGRES_HOST_PORT="$PORT" \
@@ -288,16 +313,16 @@ SELECT
         FROM ai_platform.vector_records
     ),
     (
-        SELECT count(*)
+        SELECT version_num
         FROM alembic_version
-        WHERE version_num = '0001_pgvector_foundation'
+        LIMIT 1
     );
 SQL
 )"
 
 echo "role|vector086|tables|collections|records|revision=$FINAL_STATE"
 
-[[ "$FINAL_STATE" == "1|1|2|0|0|1" ]] || {
+[[ "$FINAL_STATE" == "1|1|2|0|0|$EXPECTED_REVISION" ]] || {
   echo "FAIL: integration database final state is unexpected"
   exit 1
 }

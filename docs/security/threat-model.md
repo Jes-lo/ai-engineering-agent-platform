@@ -416,7 +416,15 @@ Current controls include:
 - parameterized Psycopg SQL for dynamic values;
 - `Jsonb` adaptation for metadata rather than interpolated JSON SQL;
 - database constraints enforcing collection dimensionality and record shape;
-- one namespace entry for `NULL` through `UNIQUE NULLS NOT DISTINCT`;
+- collection uniqueness over `(namespace, space_id)`, with `NULL` namespaces
+  compared using `UNIQUE NULLS NOT DISTINCT`;
+- explicit vector-space identity kept separate from logical namespace;
+- indexing and retrieval reject embedding-provider model substitution before
+  vector persistence or vector search;
+- pre-isolation collections migrate to `legacy-unidentified` instead of being
+  silently associated with a currently configured embedding model;
+- lossy downgrade is rejected when one namespace contains multiple vector
+  spaces;
 - exact L2 vector search without HNSW or IVFFlat indexes at this stage;
 - normalized database failures at the provider boundary;
 - runtime-owned connection-pool lifecycle;

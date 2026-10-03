@@ -184,6 +184,7 @@ def test_vector_record_validates_fields() -> None:
 def test_vector_upsert_validates_collection() -> None:
     """Upserts require unique records with equal dimensions."""
     request = VectorUpsertRequest(
+        space_id="test-space",
         records=_records(),
         namespace="tenant-a",
     )
@@ -194,13 +195,14 @@ def test_vector_upsert_validates_collection() -> None:
         ValueError,
         match="records must not be empty",
     ):
-        VectorUpsertRequest(records=())
+        VectorUpsertRequest(space_id="test-space", records=())
 
     with pytest.raises(
         ValueError,
         match="record identifiers must be unique",
     ):
         VectorUpsertRequest(
+            space_id="test-space",
             records=(
                 VectorRecord(
                     record_id="duplicate",
@@ -218,6 +220,7 @@ def test_vector_upsert_validates_collection() -> None:
         match="all vectors must have equal dimensions",
     ):
         VectorUpsertRequest(
+            space_id="test-space",
             records=(
                 VectorRecord(
                     record_id="one",
@@ -234,6 +237,7 @@ def test_vector_upsert_validates_collection() -> None:
 def test_vector_query_validates_controls() -> None:
     """Vector queries require valid vectors, limits, and namespaces."""
     request = VectorQueryRequest(
+        space_id="test-space",
         vector=(0.1, 0.2, 0.3),
         top_k=5,
         namespace="tenant-a",
@@ -246,6 +250,7 @@ def test_vector_query_validates_controls() -> None:
         match="vector must not be empty",
     ):
         VectorQueryRequest(
+            space_id="test-space",
             vector=(),
             top_k=1,
         )
@@ -255,6 +260,7 @@ def test_vector_query_validates_controls() -> None:
         match="top_k must be positive",
     ):
         VectorQueryRequest(
+            space_id="test-space",
             vector=(0.1,),
             top_k=0,
         )
@@ -264,6 +270,7 @@ def test_vector_query_validates_controls() -> None:
         match="namespace must not be empty",
     ):
         VectorQueryRequest(
+            space_id="test-space",
             vector=(0.1,),
             top_k=1,
             namespace=" ",
@@ -277,6 +284,7 @@ def test_vector_delete_validates_identifiers_and_namespace() -> None:
         match="record_ids must not be empty",
     ):
         VectorDeleteRequest(
+            space_id="test-space",
             record_ids=(),
         )
 
@@ -285,6 +293,7 @@ def test_vector_delete_validates_identifiers_and_namespace() -> None:
         match="record_ids must not contain empty values",
     ):
         VectorDeleteRequest(
+            space_id="test-space",
             record_ids=("record", " "),
         )
 
@@ -293,6 +302,7 @@ def test_vector_delete_validates_identifiers_and_namespace() -> None:
         match="record identifiers must be unique",
     ):
         VectorDeleteRequest(
+            space_id="test-space",
             record_ids=("record", "record"),
         )
 
@@ -301,6 +311,7 @@ def test_vector_delete_validates_identifiers_and_namespace() -> None:
         match="namespace must not be empty",
     ):
         VectorDeleteRequest(
+            space_id="test-space",
             record_ids=("record",),
             namespace=" ",
         )
@@ -399,6 +410,7 @@ def test_vector_store_provider_supports_structural_async_typing() -> None:
     asyncio.run(
         provider.upsert(
             VectorUpsertRequest(
+                space_id="test-space",
                 records=_records(),
                 namespace="tenant-a",
             )
@@ -408,6 +420,7 @@ def test_vector_store_provider_supports_structural_async_typing() -> None:
     response = asyncio.run(
         provider.query(
             VectorQueryRequest(
+                space_id="test-space",
                 vector=(0.1, 0.2, 0.3),
                 top_k=2,
                 namespace="tenant-a",
@@ -423,6 +436,7 @@ def test_vector_store_provider_supports_structural_async_typing() -> None:
     asyncio.run(
         provider.delete(
             VectorDeleteRequest(
+                space_id="test-space",
                 record_ids=("record-1",),
                 namespace="tenant-a",
             )
@@ -481,6 +495,7 @@ def test_vector_query_requires_integer_top_k(
         match="top_k must be an integer",
     ):
         VectorQueryRequest(
+            space_id="test-space",
             vector=(0.1, 0.2),
             top_k=top_k,  # type: ignore[arg-type]
         )
@@ -529,4 +544,66 @@ def test_vector_query_result_requires_integer_rank(
             record_id="record",
             score=1.0,
             rank=rank,  # type: ignore[arg-type]
+        )
+
+
+def test_vector_requests_preserve_explicit_space_id() -> None:
+    """Low-level vector operations must preserve caller-owned space identity."""
+    record = VectorRecord(
+        record_id="record-1",
+        vector=(0.1, 0.2),
+    )
+
+    upsert = VectorUpsertRequest(
+        records=(record,),
+        space_id="explicit-space",
+    )
+    query = VectorQueryRequest(
+        vector=(0.1, 0.2),
+        top_k=1,
+        space_id="explicit-space",
+    )
+    delete = VectorDeleteRequest(
+        record_ids=("record-1",),
+        space_id="explicit-space",
+    )
+
+    assert upsert.space_id == "explicit-space"
+    assert query.space_id == "explicit-space"
+    assert delete.space_id == "explicit-space"
+
+
+def test_vector_requests_reject_empty_space_id() -> None:
+    """Every vector operation must target one non-empty vector space."""
+    record = VectorRecord(
+        record_id="record-1",
+        vector=(0.1, 0.2),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="space_id must not be empty",
+    ):
+        VectorUpsertRequest(
+            records=(record,),
+            space_id=" ",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="space_id must not be empty",
+    ):
+        VectorQueryRequest(
+            vector=(0.1, 0.2),
+            top_k=1,
+            space_id=" ",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="space_id must not be empty",
+    ):
+        VectorDeleteRequest(
+            record_ids=("record-1",),
+            space_id=" ",
         )

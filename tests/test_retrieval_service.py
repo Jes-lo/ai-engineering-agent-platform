@@ -138,10 +138,11 @@ def _embedding_response(
     *,
     dimensions: int = 3,
     count: int = 1,
+    model: str = "synthetic-model",
 ) -> EmbeddingResponse:
     """Return deterministic synthetic embedding output."""
     return EmbeddingResponse(
-        model="synthetic-model",
+        model=model,
         embeddings=tuple(
             EmbeddingVector(
                 values=tuple(
@@ -252,6 +253,7 @@ async def test_retrieve_executes_embed_then_query() -> None:
     )
     assert vector_request.top_k == 2
     assert vector_request.namespace == "synthetic"
+    assert vector_request.space_id == "synthetic-model"
 
     assert response.query == "synthetic alpha"
     assert response.namespace == "synthetic"
@@ -496,3 +498,67 @@ def test_retrieval_service_is_publicly_exported() -> None:
         services,
         "RetrievalService",
     )
+
+
+@pytest.mark.anyio
+async def test_embedding_model_mismatch_prevents_vector_query() -> None:
+    """A substituted embedding model must never reach vector search."""
+    embedding = SyntheticEmbeddingProvider(
+        response=_embedding_response(
+            model="unexpected-model",
+        )
+    )
+    vector_store = SyntheticVectorStore(response=_vector_response())
+
+    service = RetrievalService(
+        embedding,
+        vector_store,
+        model="synthetic-model",
+        dimensions=3,
+    )
+
+    with pytest.raises(
+        ProviderExecutionError,
+        match="Embedding provider returned unexpected model",
+    ):
+        await service.retrieve(_request())
+
+    assert len(embedding.requests) == 1
+    assert vector_store.query_requests == []
+
+
+@pytest.mark.anyio
+async def test_retrieval_service_propagates_custom_space_id() -> None:
+    """Retrieval must preserve a stricter caller-owned space identity."""
+    embedding = SyntheticEmbeddingProvider(response=_embedding_response())
+    vector_store = SyntheticVectorStore(response=VectorQueryResponse(results=()))
+
+    service = RetrievalService(
+        embedding,
+        vector_store,
+        model="synthetic-model",
+        dimensions=3,
+        space_id="synthetic-model@revision-2",
+    )
+
+    await service.retrieve(_request())
+
+    assert len(vector_store.query_requests) == 1
+    assert vector_store.query_requests[0].space_id == "synthetic-model@revision-2"
+
+
+def test_retrieval_service_rejects_empty_space_id() -> None:
+    """Invalid vector-space configuration must fail before provider use."""
+    embedding = SyntheticEmbeddingProvider(response=_embedding_response())
+    vector_store = SyntheticVectorStore(response=_vector_response())
+
+    with pytest.raises(
+        ValueError,
+        match="space_id must not be empty",
+    ):
+        RetrievalService(
+            embedding,
+            vector_store,
+            model="synthetic-model",
+            space_id=" ",
+        )

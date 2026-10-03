@@ -454,13 +454,31 @@ details out of the vector-store contract.
 
 The implemented persistence schema currently contains:
 
-- vector collections keyed by optional namespace;
-- one enforced embedding dimensionality per collection;
+- vector collections keyed by optional logical namespace plus explicit
+  provider-neutral `space_id`;
+- uniqueness over `(namespace, space_id)`, including `NULL` namespaces;
+- one enforced embedding dimensionality per vector space;
 - vector records scoped to a collection;
 - arbitrary non-empty text record identifiers;
 - pgvector embeddings;
 - optional record text;
 - ordered metadata represented as a JSONB array.
+
+`namespace` and `space_id` intentionally represent different concerns.
+`namespace` partitions application data; `space_id` identifies the vector
+space in which embeddings are comparable. The indexing and retrieval services
+default `space_id` to the configured embedding model and reject an embedding
+provider response whose reported model differs from the requested model before
+vector-store operations occur.
+
+Migration `0002_embedding_space_isolation` assigns pre-existing collections to
+the explicit `legacy-unidentified` space rather than guessing which embedding
+model produced them. Moving legacy vectors into a known model space therefore
+requires explicit reindexing or separately proven provenance.
+
+A caller may use a stronger `space_id` containing revision or artifact
+identity, but the current implementation does not itself resolve, verify, or
+pin model revisions or digests.
 
 The implementation deliberately does not yet contain document, chunk,
 knowledge-source, agent, workflow, evaluation, or audit schemas.
