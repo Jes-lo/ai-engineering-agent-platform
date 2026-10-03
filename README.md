@@ -44,6 +44,16 @@ The repository currently includes:
 - ordered vector metadata persisted as JSONB;
 - reproducible PostgreSQL/pgvector integration validation using an isolated,
   ephemeral Docker Compose project;
+- deterministic character-window chunking with exact source offsets and
+  preserved document provenance;
+- provider-neutral indexing orchestration from validated chunks through the
+  embedding provider into the vector-store provider;
+- provider-neutral semantic retrieval orchestration from query embedding
+  through vector search into validated evidence;
+- strict reconstruction of retrieval provenance, source metadata, text, rank,
+  score, and citation-ready source offsets;
+- optional provider-neutral reranking orchestration that preserves the
+  original vector score and rank separately from reranker score and rank;
 - automated architectural dependency checks;
 - CI/CD and software supply-chain validation, including a dedicated
   PostgreSQL integration job.
@@ -51,19 +61,22 @@ The repository currently includes:
 Current model execution is available through provider runtime boundaries.
 LLM generation uses Ollama's non-streaming `/api/chat` endpoint, while
 embedding generation uses `/api/embed`. The FastAPI application does not yet
-expose public model-generation or embedding endpoints.
+expose public model-generation, embedding, or retrieval endpoints.
 
 Tool calling remains intentionally unsupported by the LLM contract. Non-empty
 provider `tool_calls` are rejected rather than executed or silently
 discarded.
 
-Persistent vector storage is now implemented behind the provider-neutral
-vector-store contract. The current persistence foundation does not yet provide
-a complete retrieval pipeline or RAG system.
+Persistent vector storage is now complemented by a provider-neutral
+retrieval foundation. Deterministic chunking, indexing orchestration, semantic
+retrieval, validated evidence reconstruction, and optional reranking
+orchestration are implemented and covered by tests.
 
-RAG pipelines, ingestion/chunking pipelines, reranking, executable tools,
-agents, MCP integrations, workflow execution, and AI observability backends
-have not yet been implemented.
+The repository still does not implement knowledge-source ingestion, a public
+retrieval API, a concrete reranker adapter, context assembly, grounded model
+generation, citation rendering, tenant-aware retrieval authorization,
+complete RAG orchestration, executable tools, agents, MCP integrations,
+workflow execution, or AI observability backends.
 
 ## Planned Capabilities
 
@@ -73,11 +86,13 @@ including:
 - additional local and remote model adapters;
 - streaming and richer model-capability handling;
 - additional embedding-provider adapters;
-- retrieval-augmented generation;
-- retrieval and reranking pipelines over persisted vectors;
+- knowledge-source ingestion and parsing;
+- public retrieval API exposure;
+- concrete local or remote reranker adapters;
+- retrieval-augmented generation with context assembly;
 - production database hardening, backup/recovery, and availability patterns;
 - tenant-aware retrieval authorization and data lifecycle controls;
-- grounded responses and citations;
+- grounded model responses and citation rendering;
 - agent execution;
 - authorized tool calling;
 - MCP integrations and a project-owned MCP server;
