@@ -35,7 +35,7 @@ The architecture prioritizes:
 The current repository implements foundational platform layers, concrete LLM
 and embedding runtime integrations through Ollama, a PostgreSQL + pgvector
 persistence foundation, and provider-neutral indexing, semantic retrieval,
-optional reranking, context assembly, and grounded generation orchestration.
+optional reranking, grounded generation, and end-to-end RAG orchestration.
 
 Implemented capabilities currently include:
 
@@ -86,6 +86,12 @@ Implemented capabilities currently include:
   evidence;
 - preservation of retrieval provenance outside model-authored output;
 - explicit insufficient-evidence abstention;
+- provider-neutral end-to-end RAG composition through `RAGService`;
+- deterministic retrieval -> optional reranking -> grounded-generation stage
+  ordering;
+- no-evidence short-circuiting before reranker or LLM execution;
+- preservation of original retrieval and effective grounding input through
+  `RAGResult`;
 - runtime composition that owns the database pool while the adapter remains
   lifecycle-independent;
 - isolated live PostgreSQL integration validation with ephemeral credentials
@@ -99,14 +105,15 @@ implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
-endpoint, streaming model generation, complete end-to-end RAG orchestration,
-concrete reranker adapter, agent runtime, executable tool integration, MCP
-integration, workflow runtime, or AI observability backend.
+endpoint, streaming model generation, concrete reranker adapter, agent runtime,
+executable tool integration, MCP integration, workflow runtime, or AI
+observability backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
 semantic retrieval, provider-neutral optional reranking, deterministic context
-assembly, and grounded generation are implemented. Production concerns such as
-tenant-aware authorization, backup/recovery, high availability,
+assembly, grounded generation, and end-to-end RAG orchestration are
+implemented. Production concerns such as tenant-aware authorization,
+backup/recovery, high availability,
 encryption-at-rest policy, retention, and approximate-nearest-neighbor indexing
 are not yet implemented by this repository.
 
@@ -285,9 +292,8 @@ reranker adapter or reranker runtime is implemented yet.
 
 The current RAG foundation still does not include knowledge-source ingestion,
 parsing, a public retrieval API, tenant-aware retrieval authorization,
-complete end-to-end orchestration that invokes retrieval and grounded
-generation as one workflow, presentation-layer citation rendering, or semantic
-groundedness/entailment verification.
+presentation-layer citation rendering, or semantic groundedness/entailment
+verification.
 
 ### Knowledge and RAG
 
@@ -331,11 +337,18 @@ The broader RAG subsystem evolves through the following target flow:
       v
     grounded answer + citations
 
-Features 6 and 7 currently cover deterministic chunking, embeddings and
+Features 6, 7, and 8 currently cover deterministic chunking, embeddings and
 indexing orchestration, semantic retrieval, evidence reconstruction,
 provider-neutral optional reranking, deterministic context assembly, grounded
-model generation over supplied retrieval results, explicit abstention, and
-citation-marker resolution back to validated evidence.
+model generation, explicit abstention, citation-marker resolution back to
+validated evidence, and end-to-end retrieval-to-generation composition.
+
+`RAGService` invokes `RetrievalService`, optionally applies
+`RerankingService`, and supplies the resulting validated evidence to
+`GroundedGenerationService`. Empty retrieval becomes an explicit abstention
+without invoking a reranker or LLM. Successful executions preserve the
+original retrieval result separately from the exact grounding input so vector
+ranking diagnostics are not lost when reranking is enabled.
 
 `GroundedGenerationService` intentionally accepts an already validated
 `RetrievalResponse` or `RerankedRetrievalResponse` instead of invoking
@@ -353,9 +366,8 @@ prove that every generated sentence is semantically entailed by its cited
 evidence, that the evidence is true, or that indirect prompt injection has been
 eliminated.
 
-Source ingestion, complete retrieval-to-generation orchestration,
-presentation-layer citation rendering, and automated semantic
-groundedness/citation-quality evaluation remain future stages.
+Source ingestion, presentation-layer citation rendering, and automated
+semantic groundedness/citation-quality evaluation remain future stages.
 
 Retrieval and answer-grounding quality must eventually be measurable through
 evaluations rather than judged only manually.
