@@ -11,6 +11,11 @@ from ai_engineering_agent_platform.domain.errors import (
     ProviderExecutionError,
     ProviderUnavailableError,
 )
+from ai_engineering_agent_platform.domain.grounding import (
+    GroundedAnswer,
+    GroundedAnswerStatus,
+    GroundedCitation,
+)
 from ai_engineering_agent_platform.domain.retrieval import (
     DocumentChunk,
     KnowledgeDocument,
@@ -26,6 +31,9 @@ from ai_engineering_agent_platform.domain.retrieval import (
 __all__ = [
     "DeterministicTextChunker",
     "DocumentChunk",
+    "GroundedAnswer",
+    "GroundedAnswerStatus",
+    "GroundedCitation",
     "KnowledgeDocument",
     "PlatformError",
     "ProviderConfigurationError",

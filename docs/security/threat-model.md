@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.5
+Version: 0.6
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -334,7 +334,9 @@ The following rules should remain true as the project evolves:
 10. privileged AI actions must be auditable;
 11. execution must eventually have bounded resource consumption;
 12. planned security controls must become executable tests when the
-    corresponding functionality is implemented.
+    corresponding functionality is implemented;
+13. citation provenance must be resolved from platform-owned retrieved evidence
+    rather than model-authored source identifiers.
 
 ## Current Ollama Runtime Security Posture
 
@@ -441,6 +443,47 @@ The local Docker configuration and external development secret files are
 development mechanisms, not a production secret-management, backup, high
 availability, encryption, or disaster-recovery design.
 
+## Current Grounded Generation Security Posture
+
+Grounded generation is now an active application surface over already validated
+retrieval evidence.
+
+Current controls include:
+
+- `GroundedGenerationService` accepts only a `RetrievalResponse` or
+  `RerankedRetrievalResponse` supplied by the caller;
+- retrieved evidence is serialized into a deterministic context payload and
+  remains explicitly treated as untrusted data;
+- the grounding prompt instructs the model not to treat retrieved evidence as
+  instructions, but prompt wording is not treated as a complete security
+  boundary;
+- model responses must identify the exact configured model;
+- only a completed `STOP` generation is accepted as a normal grounded result;
+- empty generations fail closed;
+- normal answers must contain at least one canonical citation marker;
+- citation identifiers use the canonical `C1`, `C2`, ... grammar;
+- malformed citation-like markers fail closed;
+- citation identifiers outside the supplied evidence set fail closed;
+- duplicate model references resolve to one platform citation object;
+- the exact `INSUFFICIENT_EVIDENCE` sentinel produces an explicit abstention;
+- mixing the abstention sentinel with asserted answer text fails closed;
+- source reference, document identity, offsets, metadata, vector diagnostics,
+  and other provenance remain owned by the retrieved evidence object rather
+  than being accepted from model-authored output.
+
+These controls establish citation integrity and provenance binding. They do not
+establish semantic entailment between every generated claim and its citation,
+prove that retrieved evidence is correct, or eliminate direct or indirect
+prompt injection.
+
+The grounding service also does not perform retrieval authorization. Callers
+must enforce user or tenant authorization before retrieved evidence becomes
+model context.
+
+Presentation-layer citation rendering, automated groundedness/citation-quality
+evaluation, complete retrieval-to-generation orchestration, and stronger prompt
+injection defenses remain future work.
+
 ## Current Limitations
 
 The repository now contains concrete Ollama LLM and embedding adapters with
@@ -494,9 +537,8 @@ The current retrieval foundation does not yet implement:
 - parsing of external knowledge sources;
 - a public retrieval API;
 - a concrete reranker adapter or reranker runtime;
-- context assembly for generation;
-- grounded model generation;
-- citation rendering;
+- presentation-layer citation rendering;
+- semantic groundedness or entailment verification;
 - complete RAG orchestration;
 - per-user or per-tenant retrieval authorization;
 - row-level tenant isolation;
@@ -510,9 +552,9 @@ The current retrieval foundation does not yet implement:
 - MCP integration;
 - workflow runtime.
 
-Retrieval and provider-neutral reranking are therefore active application
-surfaces rather than purely anticipatory surfaces. Knowledge-source ingestion,
-grounded generation, public retrieval exposure, tenant authorization, agents,
+Retrieval, provider-neutral reranking, and grounded generation are therefore
+active application surfaces rather than purely anticipatory surfaces. Knowledge-source ingestion,
+public retrieval exposure, tenant authorization, agents,
 MCP, workflows, and AI observability remain partially or wholly anticipatory
 and require additional executable controls when introduced.
 

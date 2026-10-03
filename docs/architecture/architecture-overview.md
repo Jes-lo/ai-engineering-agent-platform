@@ -34,8 +34,8 @@ The architecture prioritizes:
 
 The current repository implements foundational platform layers, concrete LLM
 and embedding runtime integrations through Ollama, a PostgreSQL + pgvector
-persistence foundation, and provider-neutral indexing, semantic retrieval, and
-optional reranking orchestration.
+persistence foundation, and provider-neutral indexing, semantic retrieval,
+optional reranking, context assembly, and grounded generation orchestration.
 
 Implemented capabilities currently include:
 
@@ -77,6 +77,15 @@ Implemented capabilities currently include:
 - strict mapping from vector results into validated retrieval evidence;
 - optional provider-neutral reranking through `RerankingService`;
 - preservation of original vector scores and ranks when reranking;
+- deterministic context assembly from `RetrievalResponse` or
+  `RerankedRetrievalResponse`;
+- provider-neutral grounded generation through `GroundedGenerationService`;
+- fail-closed grounded-generation checks for configured model identity and a
+  completed `STOP` finish reason;
+- canonical citation-marker validation and resolution to already retrieved
+  evidence;
+- preservation of retrieval provenance outside model-authored output;
+- explicit insufficient-evidence abstention;
 - runtime composition that owns the database pool while the adapter remains
   lifecycle-independent;
 - isolated live PostgreSQL integration validation with ephemeral credentials
@@ -90,16 +99,16 @@ implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
-endpoint, streaming model generation, complete RAG orchestration, concrete
-reranker adapter, agent runtime, executable tool integration, MCP integration,
-workflow runtime, or AI observability backend.
+endpoint, streaming model generation, complete end-to-end RAG orchestration,
+concrete reranker adapter, agent runtime, executable tool integration, MCP
+integration, workflow runtime, or AI observability backend.
 
-PostgreSQL + pgvector persistence, deterministic chunking, indexing
-orchestration, semantic retrieval, and provider-neutral optional reranking
-orchestration are implemented. Production concerns such as tenant-aware
-authorization, backup/recovery, high availability, encryption-at-rest policy,
-retention, and approximate-nearest-neighbor indexing are not yet implemented
-by this repository.
+PostgreSQL + pgvector persistence, deterministic chunking, indexing,
+semantic retrieval, provider-neutral optional reranking, deterministic context
+assembly, and grounded generation are implemented. Production concerns such as
+tenant-aware authorization, backup/recovery, high availability,
+encryption-at-rest policy, retention, and approximate-nearest-neighbor indexing
+are not yet implemented by this repository.
 
 ## High-Level Architecture
 
@@ -274,10 +283,11 @@ provider-neutral `RerankerProvider`. Reranking preserves the original vector
 score and rank separately from the reranker score and final rank. No concrete
 reranker adapter or reranker runtime is implemented yet.
 
-The current retrieval foundation still does not include knowledge-source
-ingestion, parsing, a public retrieval API, tenant-aware retrieval
-authorization, context assembly, grounded model generation, citation
-rendering, or complete RAG orchestration.
+The current RAG foundation still does not include knowledge-source ingestion,
+parsing, a public retrieval API, tenant-aware retrieval authorization,
+complete end-to-end orchestration that invokes retrieval and grounded
+generation as one workflow, presentation-layer citation rendering, or semantic
+groundedness/entailment verification.
 
 ### Knowledge and RAG
 
@@ -321,14 +331,34 @@ The broader RAG subsystem evolves through the following target flow:
       v
     grounded answer + citations
 
-The implemented Feature 6 foundation currently covers deterministic chunking,
-embeddings and indexing orchestration, semantic retrieval, evidence
-reconstruction, and provider-neutral optional reranking. Source ingestion,
-context assembly, model generation, grounded-answer construction, and citation
-rendering remain future stages.
+Features 6 and 7 currently cover deterministic chunking, embeddings and
+indexing orchestration, semantic retrieval, evidence reconstruction,
+provider-neutral optional reranking, deterministic context assembly, grounded
+model generation over supplied retrieval results, explicit abstention, and
+citation-marker resolution back to validated evidence.
 
-Retrieval quality must eventually be measurable through evaluations
-rather than judged only manually.
+`GroundedGenerationService` intentionally accepts an already validated
+`RetrievalResponse` or `RerankedRetrievalResponse` instead of invoking
+retrieval itself. The service constructs a provider-neutral `LLMRequest`,
+requires the configured model identity and a completed `STOP` response, then
+resolves canonical markers such as `[[C1]]` only against the evidence presented
+to the model.
+
+The model does not supply authoritative source references, document
+identifiers, source offsets, or retrieval metadata. Those values remain owned
+by the validated evidence object retained by the platform.
+
+These controls establish citation integrity and provenance binding. They do not
+prove that every generated sentence is semantically entailed by its cited
+evidence, that the evidence is true, or that indirect prompt injection has been
+eliminated.
+
+Source ingestion, complete retrieval-to-generation orchestration,
+presentation-layer citation rendering, and automated semantic
+groundedness/citation-quality evaluation remain future stages.
+
+Retrieval and answer-grounding quality must eventually be measurable through
+evaluations rather than judged only manually.
 
 ### Agent Runtime
 
