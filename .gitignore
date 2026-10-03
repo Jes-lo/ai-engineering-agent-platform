@@ -85,3 +85,6 @@ langfuse-data/
 # Test / runtime artifacts
 artifacts/
 reports/
+
+# Repository-local security tooling
+.tools/

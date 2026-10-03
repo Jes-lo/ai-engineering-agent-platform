@@ -11,10 +11,23 @@ No ownership is claimed over third-party materials.
 
 ## Components Currently Used
 
-No runtime software dependencies have been introduced yet.
+The project currently uses the following direct software dependencies.
 
-Components will be added to this document when they become part of the
-repository or its supported development/runtime environment.
+| Component | Version policy | Purpose | License |
+| --- | --- | --- | --- |
+| FastAPI | 0.142.x | HTTP API framework | MIT |
+| Uvicorn | 0.54.x | ASGI application server | BSD-3-Clause |
+| pydantic-settings | 2.15.x | Runtime configuration | MIT |
+| pytest | 9.1.x | Automated testing | MIT |
+| HTTPX2 | 2.13.x | HTTP testing client | BSD-3-Clause |
+| Ruff | 0.16.x | Formatting and static linting | MIT |
+| mypy | 2.4.x | Static type checking | MIT |
+
+Exact resolved dependency versions, including transitive dependencies,
+are recorded in `uv.lock`.
+
+Automated SBOM and complete dependency-license inventory generation will
+be introduced alongside the corresponding software supply-chain controls.
 
 ## External Services and Tooling
 
@@ -88,3 +101,24 @@ license, and required notices must be recorded before merge.
 This file must be updated whenever a new third-party dependency, model,
 dataset, service, specification, tool, or other material creates
 licensing, attribution, redistribution, trademark, or usage obligations.
+
+## Development, Security, and CI Tooling
+
+The project also uses external development, security, and CI tooling.
+
+| Component | Version / pin | Purpose |
+| --- | --- | --- |
+| uv | 0.12.17 | Python environment and dependency management |
+| Gitleaks | 8.30.1 | Secret scanning |
+| pip-audit | 2.10.1 | Dependency vulnerability auditing |
+| pip-licenses | 5.5.5 | Dependency-license inventory |
+| CycloneDX Python | 7.3.1 | SBOM generation |
+| actionlint | 1.7.12 | GitHub Actions static validation |
+| actions/checkout | v7.0.1, SHA pinned | Repository checkout in CI |
+| astral-sh/setup-uv | v10.2.0, SHA pinned | uv setup in CI |
+| actions/upload-artifact | v7.0.1, SHA pinned | CI evidence retention |
+
+These tools and actions remain subject to their respective upstream
+licenses, terms, copyrights, and ownership.
+
+Repository licensing does not apply to these third-party components.

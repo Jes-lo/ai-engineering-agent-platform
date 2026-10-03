@@ -8,10 +8,11 @@ platform engineering practices.
 
 Early development.
 
-The repository currently contains the initial governance, security, and
-architecture foundation.
+The repository contains the initial governance, security, architecture,
+and Python/FastAPI application foundation.
 
-Runtime services and AI capabilities have not yet been implemented.
+AI models, RAG, agents, persistent storage, tools, MCP integrations, and
+workflow capabilities have not yet been implemented.
 
 ## Planned Capabilities
 
@@ -41,6 +42,52 @@ including:
 Capabilities listed here describe project direction and are not considered
 implemented until corresponding code, tests, documentation, and validation
 are merged.
+
+## Local Development
+
+The project currently targets Python 3.13.15 and uses `uv` for dependency
+and environment management.
+
+Synchronize the environment:
+
+    uv sync
+
+Run the API locally:
+
+    uv run uvicorn ai_engineering_agent_platform.app:app --host 127.0.0.1 --port 8000
+
+Current system endpoints:
+
+- `GET /health` - liveness;
+- `GET /ready` - readiness.
+
+Run local validation:
+
+    uv run pytest
+    uv run ruff format --check src tests
+    uv run ruff check src tests
+    uv run mypy src tests
+
+## Continuous Integration
+
+GitHub Actions validates pull requests and pushes to `main`.
+
+The current CI baseline includes:
+
+- GitHub Actions workflow linting;
+- locked Python environment synchronization;
+- formatting;
+- linting;
+- strict static type checking;
+- automated tests with warnings treated as errors;
+- package build validation;
+- Git history and working-tree secret scanning;
+- dependency vulnerability auditing;
+- dependency-license inventory;
+- CycloneDX SBOM generation and validation.
+
+Supply-chain reports are generated during CI and retained as workflow
+artifacts for a limited period.
 
 ## Architecture
 

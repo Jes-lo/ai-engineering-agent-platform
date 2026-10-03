@@ -1,0 +1,60 @@
+[project]
+name = "ai-engineering-agent-platform"
+version = "0.1.0"
+description = "Self-hosted AI engineering and agent platform."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = "LicenseRef-Proprietary"
+dependencies = [
+    "fastapi>=0.142.2,<0.143",
+    "pydantic-settings>=2.15.0,<2.16",
+    "uvicorn>=0.54.0,<0.55",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "S",
+    "RUF",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1,<2.14",
+    "mypy>=2.4.0,<2.5",
+    "pytest>=9.1.1,<9.2",
+    "ruff>=0.16.10,<0.17",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+
+[tool.uv]
+required-version = "==0.12.17"
