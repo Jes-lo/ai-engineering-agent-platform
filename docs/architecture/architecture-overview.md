@@ -33,8 +33,9 @@ The architecture prioritizes:
 ## Current Implementation
 
 The current repository implements foundational platform layers, concrete LLM
-and embedding runtime integrations through Ollama, and a PostgreSQL + pgvector
-persistence foundation behind the vector-store contract.
+and embedding runtime integrations through Ollama, a PostgreSQL + pgvector
+persistence foundation, and provider-neutral indexing, semantic retrieval, and
+optional reranking orchestration.
 
 Implemented capabilities currently include:
 
@@ -70,6 +71,12 @@ Implemented capabilities currently include:
 - a concrete `PostgreSQLVectorStoreProvider` for upsert, exact L2 query, and
   scoped delete behavior;
 - ordered JSONB metadata storage;
+- deterministic text chunking with exact source offsets and provenance;
+- provider-neutral indexing orchestration through `IndexingService`;
+- provider-neutral semantic retrieval through `RetrievalService`;
+- strict mapping from vector results into validated retrieval evidence;
+- optional provider-neutral reranking through `RerankingService`;
+- preservation of original vector scores and ranks when reranking;
 - runtime composition that owns the database pool while the adapter remains
   lifecycle-independent;
 - isolated live PostgreSQL integration validation with ephemeral credentials
@@ -82,16 +89,17 @@ Provider-neutral contracts remain independent of Ollama-specific
 implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
-There is currently no public model-generation or embedding API endpoint,
-streaming model generation, complete retrieval/RAG pipeline, agent runtime,
-executable tool integration, MCP integration, workflow runtime, or AI
-observability backend.
+There is currently no public model-generation, embedding, or retrieval API
+endpoint, streaming model generation, complete RAG orchestration, concrete
+reranker adapter, agent runtime, executable tool integration, MCP integration,
+workflow runtime, or AI observability backend.
 
-PostgreSQL + pgvector persistence and exact vector-store operations are
-implemented, but production concerns such as tenant-aware authorization,
-backup/recovery, high availability, encryption-at-rest policy, retention,
-and approximate-nearest-neighbor indexing are not yet implemented by this
-repository.
+PostgreSQL + pgvector persistence, deterministic chunking, indexing
+orchestration, semantic retrieval, and provider-neutral optional reranking
+orchestration are implemented. Production concerns such as tenant-aware
+authorization, backup/recovery, high availability, encryption-at-rest policy,
+retention, and approximate-nearest-neighbor indexing are not yet implemented
+by this repository.
 
 ## High-Level Architecture
 
@@ -247,15 +255,33 @@ The current dependency flow is:
 
 Embedding implementations remain replaceable behind the provider contract.
 
-Generated embedding vectors can now be persisted explicitly through the
-separate provider-neutral vector-store contract and PostgreSQL/pgvector
-adapter. Embedding generation does not automatically persist data, and no
-end-to-end ingestion, indexing pipeline, retrieval pipeline, reranking, or
-RAG orchestration has been introduced yet.
+Generated embeddings can be persisted through provider-neutral indexing
+orchestration. `IndexingService` maps validated document chunks to an
+`EmbeddingProvider`, verifies the embedding response, and then maps the
+resulting vectors into `VectorStoreProvider` upserts.
+
+`RetrievalService` performs the complementary semantic-query path: it embeds
+one retrieval query, executes a provider-neutral vector query, and converts
+the returned records into validated retrieval evidence.
+
+Retrieval evidence preserves the original vector score and rank together with
+chunk identity, document identity, source reference, source metadata, text,
+title, and exact source offsets. Persisted retrieval provenance is validated
+strictly rather than guessed or silently coerced.
+
+`RerankingService` can optionally pass retrieved evidence through the existing
+provider-neutral `RerankerProvider`. Reranking preserves the original vector
+score and rank separately from the reranker score and final rank. No concrete
+reranker adapter or reranker runtime is implemented yet.
+
+The current retrieval foundation still does not include knowledge-source
+ingestion, parsing, a public retrieval API, tenant-aware retrieval
+authorization, context assembly, grounded model generation, citation
+rendering, or complete RAG orchestration.
 
 ### Knowledge and RAG
 
-The RAG subsystem is expected to evolve through:
+The broader RAG subsystem evolves through the following target flow:
 
     source
       |
@@ -294,6 +320,12 @@ The RAG subsystem is expected to evolve through:
       |
       v
     grounded answer + citations
+
+The implemented Feature 6 foundation currently covers deterministic chunking,
+embeddings and indexing orchestration, semantic retrieval, evidence
+reconstruction, and provider-neutral optional reranking. Source ingestion,
+context assembly, model generation, grounded-answer construction, and citation
+rendering remain future stages.
 
 Retrieval quality must eventually be measurable through evaluations
 rather than judged only manually.

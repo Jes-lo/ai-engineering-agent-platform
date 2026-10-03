@@ -135,3 +135,17 @@ def test_domain_does_not_depend_on_outer_layers() -> None:
             f"{PACKAGE_NAME}.config",
         ),
     )
+
+
+def test_services_depend_only_on_domain_and_contracts() -> None:
+    """Application services must not depend on concrete outer layers."""
+    _assert_no_forbidden_imports(
+        "services",
+        (
+            f"{PACKAGE_NAME}.adapters",
+            f"{PACKAGE_NAME}.api",
+            f"{PACKAGE_NAME}.app",
+            f"{PACKAGE_NAME}.config",
+            f"{PACKAGE_NAME}.runtime",
+        ),
+    )

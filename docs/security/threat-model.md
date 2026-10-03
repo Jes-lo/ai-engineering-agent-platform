@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.4
+Version: 0.5
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -455,21 +455,40 @@ The current Ollama runtime does not implement:
 - per-user or per-tenant model authorization;
 - AI-specific telemetry or model-operation tracing.
 
-The repository now has PostgreSQL + pgvector persistence and a concrete
+The repository has PostgreSQL + pgvector persistence and a concrete
 vector-store provider supporting upsert, exact L2 nearest-neighbor query, and
 scoped delete operations.
 
-Embedding generation remains a separate capability: embeddings are not
-automatically persisted unless a caller explicitly passes vector records to
-the vector-store provider.
+Feature 6 activates provider-neutral retrieval execution paths on top of that
+persistence foundation:
 
-The current persistence capability does not yet implement:
+- deterministic text chunking preserves exact source offsets and document
+  provenance;
+- indexing orchestration sends validated chunk text through the embedding
+  provider and persists the resulting vectors through the vector-store
+  provider;
+- semantic retrieval embeds a query, performs vector search, and reconstructs
+  validated retrieval evidence;
+- retrieval provenance, source metadata, text, vector score, vector rank,
+  source reference, and offsets are validated before evidence is returned;
+- optional reranking uses the existing provider-neutral reranker contract while
+  preserving the original vector score and rank separately from reranker
+  output;
+- empty retrieval results bypass reranking without invoking a reranker.
+
+Retrieved content remains untrusted data. Retrieval evidence must not be
+interpreted as trusted model instruction merely because it passed vector
+similarity, provenance reconstruction, or reranking.
+
+The current retrieval foundation does not yet implement:
 
 - document or knowledge-source ingestion;
-- chunking;
-- automatic embedding-to-vector-store orchestration;
-- a retrieval application service or public retrieval API;
-- reranking;
+- parsing of external knowledge sources;
+- a public retrieval API;
+- a concrete reranker adapter or reranker runtime;
+- context assembly for generation;
+- grounded model generation;
+- citation rendering;
 - complete RAG orchestration;
 - per-user or per-tenant retrieval authorization;
 - row-level tenant isolation;
@@ -478,14 +497,16 @@ The current persistence capability does not yet implement:
 - database high availability;
 - repository-defined encryption-at-rest controls;
 - approximate-nearest-neighbor indexes;
+- adversarial retrieval evaluations;
 - agent runtime;
 - MCP integration;
 - workflow runtime.
 
-Retrieval, tools, agents, MCP, workflows, and observability therefore remain
-partially or wholly anticipatory attack surfaces. Controls for those surfaces
-must become executable and testable as the corresponding runtime capabilities
-are introduced.
+Retrieval and provider-neutral reranking are therefore active application
+surfaces rather than purely anticipatory surfaces. Knowledge-source ingestion,
+grounded generation, public retrieval exposure, tenant authorization, agents,
+MCP, workflows, and AI observability remain partially or wholly anticipatory
+and require additional executable controls when introduced.
 
 Each future feature must update this threat model when it materially
 changes:
