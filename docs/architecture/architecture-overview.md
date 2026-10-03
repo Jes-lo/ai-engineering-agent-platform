@@ -33,10 +33,11 @@ The architecture prioritizes:
 ## Current Implementation
 
 The current repository implements foundational platform layers, concrete LLM
-and embedding runtime integrations through Ollama, a PostgreSQL + pgvector
-persistence foundation, bounded caller-supplied text ingestion, and
-provider-neutral indexing, semantic retrieval, optional reranking, grounded
-generation, and end-to-end RAG orchestration.
+and embedding runtime integrations through Ollama, PostgreSQL + pgvector
+persistence, bounded caller-supplied text ingestion, provider-neutral indexing,
+semantic retrieval, optional reranking, grounded generation, end-to-end RAG
+orchestration, controlled tool execution, bounded agent-turn orchestration, and
+a bounded conversational agent loop with typed tool-result history.
 
 Implemented capabilities currently include:
 
@@ -116,9 +117,9 @@ implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
-endpoint, streaming model generation, concrete reranker adapter, full conversational agent loop,
-MCP integration, workflow runtime, or AI
-observability backend.
+endpoint, streaming model generation, concrete reranker adapter,
+durable/distributed conversational-agent runtime, MCP integration, workflow
+runtime, or AI observability backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
 semantic retrieval, provider-neutral optional reranking, deterministic context
@@ -433,10 +434,51 @@ transactional. If one provider execution succeeds and a later execution fails,
 the platform does not claim rollback or atomicity, and it deliberately does not
 automatically replay the batch after execution has started.
 
-The current layer is still not a full conversational agent loop. It does not
-add `MessageRole.TOOL`, serialize tool results back into LLM messages, perform
-tool-result/model round trips, execute MCP capabilities or workflows, integrate
-n8n, or add shell/filesystem/network tools.
+`ControlledAgentService` deliberately remains a bounded single-turn execution
+boundary. Feature 14 does not expand that service's execution authority;
+`BoundedAgentLoopService` composes repeated controlled turns around it and
+maintains typed tool-call/tool-result conversation history. Each later model
+proposal therefore crosses the same Feature 13 execution controls again.
+
+### Bounded Conversational Agent Loop Boundary
+
+`BoundedAgentLoopService` provides the current multi-turn composition layer.
+
+Its provider-neutral transcript uses:
+
+- ordinary `LLMMessage` values for system, user, and plain assistant messages;
+- `LLMAssistantToolCallMessage` for the model decision that proposed tools;
+- `LLMToolResultMessage` for validated controlled tool results;
+- explicit `MessageRole.TOOL` semantics for tool-result context.
+
+`LLMRequest` validates the transcript before generation. Tool results cannot be
+orphaned, cannot precede their assistant proposal, must match the proposed tool
+name, and must preserve matching optional `provider_call_id` metadata.
+
+Platform `ToolResult.call_id` remains available inside platform state for
+execution/audit correlation but is intentionally not serialized into the
+Ollama tool-result wire message. Provider call IDs remain transcript metadata,
+not execution authorization.
+
+The loop applies two independent caller-selected budgets under hard platform
+ceilings:
+
+- `MAX_AGENT_LOOP_MODEL_TURNS = 8`;
+- `MAX_AGENT_LOOP_TOOL_CALLS = 8`.
+
+Tool-call consumption is cumulative across model turns. When the remaining
+tool budget reaches zero, tools are no longer exposed on the next controlled
+turn. An oversized model-proposed batch fails before provider execution.
+
+Every executable proposal still flows through `ControlledAgentService`; the
+loop has no direct `ToolExecutionService` execution path. Approval-required
+plans pause before execution, and resume reuses the exact previously issued
+decision without asking the model to regenerate it.
+
+Loop continuation state remains process-local and in-memory. The feature does
+not claim durable recovery, distributed coordination, authenticated approver
+identity, transactional tool batches, rollback, automatic execution retries,
+MCP, workflows, n8n, or shell/filesystem/network tools.
 
 ### LLM Tool-Call Proposal Boundary
 
@@ -494,14 +536,15 @@ human identity, persistence, signatures, expiry, revocation, or single-use
 consumption.
 
 The controlled execution service itself remains model-agnostic.
-`ToolExecutionService.validate()` provides the same deterministic
-registration, enabled-policy, allowlist, approval, and argument checks used by
-`execute()` without calling the provider. `ControlledAgentService` composes
-that boundary with `LLMToolCall` proposals, but provider output never grants
-approval or bypasses execution policy. Full tool-result conversation loops,
-durable agent state, authenticated HITL approval, MCP discovery, workflow
-execution, n8n integration, shell tools, filesystem tools, and network tools
-remain future capabilities.
+`ToolExecutionService.validate()` provides the deterministic registration,
+enabled-policy, allowlist, approval, and argument checks used by `execute()`
+without calling the provider. `ControlledAgentService` composes that boundary
+with untrusted `LLMToolCall` proposals, and `BoundedAgentLoopService` composes
+multiple controlled turns plus validated tool-result history without granting
+the model new execution authority. Durable/distributed agent state,
+authenticated HITL approval, MCP discovery, workflow execution, n8n
+integration, shell tools, filesystem tools, and network tools remain future
+capabilities.
 
 ### MCP
 

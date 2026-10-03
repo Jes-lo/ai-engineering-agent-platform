@@ -12,6 +12,17 @@ from ai_engineering_agent_platform.services.agent import (
     AgentTurnStatus,
     ControlledAgentService,
 )
+from ai_engineering_agent_platform.services.agent_loop import (
+    MAX_AGENT_LOOP_MODEL_TURNS,
+    MAX_AGENT_LOOP_TOOL_CALLS,
+    AgentLoopBudgetError,
+    AgentLoopError,
+    AgentLoopRequest,
+    AgentLoopResult,
+    AgentLoopResumeError,
+    AgentLoopStatus,
+    BoundedAgentLoopService,
+)
 from ai_engineering_agent_platform.services.evaluation import (
     RAGEvaluationCaseExecution,
     RAGEvaluationRunResult,
@@ -85,7 +96,15 @@ from ai_engineering_agent_platform.services.tool_execution import (
 )
 
 __all__ = [
+    "MAX_AGENT_LOOP_MODEL_TURNS",
+    "MAX_AGENT_LOOP_TOOL_CALLS",
     "MAX_AGENT_TURN_STEPS",
+    "AgentLoopBudgetError",
+    "AgentLoopError",
+    "AgentLoopRequest",
+    "AgentLoopResult",
+    "AgentLoopResumeError",
+    "AgentLoopStatus",
     "AgentOrchestrationError",
     "AgentPlannedToolCall",
     "AgentResponseError",
@@ -94,6 +113,7 @@ __all__ = [
     "AgentTurnRequest",
     "AgentTurnResult",
     "AgentTurnStatus",
+    "BoundedAgentLoopService",
     "ControlledAgentService",
     "ControlledToolExecutionResult",
     "DocumentChunker",

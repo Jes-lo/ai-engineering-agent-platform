@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.2
+Version: 1.3
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -217,9 +217,10 @@ fails closed. A parsed proposal remains separate from `ToolInvocation`,
 `ToolExecutionAuthorization`, approval state, and `ToolExecutionService`, so
 model output cannot directly acquire execution authority.
 
-Full conversational agent loops, MCP integration, workflows, n8n integration,
-richer authorization scopes, durable continuation state, and authenticated
-human-approval lifecycle controls remain future work.
+Bounded conversational looping and typed tool-result round trips are now
+implemented through `BoundedAgentLoopService`. Durable/distributed continuation
+state, richer authorization scopes, authenticated human-approval lifecycle
+controls, MCP integration, workflows, and n8n integration remain future work.
 
 ### LLM Tool-Call Proposal Threat Boundary
 
@@ -244,14 +245,14 @@ Current controls are:
   proposal responses.
 
 The LLM proposal layer alone still does not execute tools or grant authority.
-The separate `ControlledAgentService` may convert an accepted proposal into a
-controlled `ToolInvocation`, but only after the proposed tool was explicitly
-exposed from the registered/enabled/authorized set. The orchestration layer
-uses fresh platform-owned call identity, bounded proposal counts, whole-plan
-preflight, and approval pause/resume semantics. It still does not return tool
-results to the model, add `MessageRole.TOOL`, implement a full conversational
-loop, provide durable or authenticated HITL state, connect MCP, execute
-workflows, integrate n8n, or add shell/filesystem/network tools.
+`ControlledAgentService` remains the execution bridge from accepted proposals
+to controlled `ToolInvocation` values. `BoundedAgentLoopService` may now return
+validated `ToolResult` content to the model through typed
+`LLMToolResultMessage` values and explicit `MessageRole.TOOL` semantics, but a
+tool result is untrusted model context rather than authorization. Any later
+model proposal must pass through the controlled execution boundary again.
+Durable/authenticated HITL state, MCP, workflows, n8n, and
+shell/filesystem/network tools remain outside this feature.
 
 ### Controlled Agent Turn Orchestration Threat Boundary
 
@@ -292,10 +293,54 @@ Residual limitations are explicit:
 - sequential multi-tool execution is not transactional;
 - a later provider failure cannot roll back an earlier successful side effect;
 - automatic retry after tool execution starts is intentionally absent;
-- there is no current `MessageRole.TOOL` or tool-result-to-model round trip;
-- there is no full conversational agent loop;
+- the single-turn execution service itself does not persist or own multi-turn
+  conversation history; Feature 14 composes it through a separate bounded loop;
+- bounded conversational looping exists, but its pending continuation state is
+  still process-local rather than durable or distributed;
 - there is no MCP, workflow engine, n8n execution, shell tool, filesystem tool,
   or network tool in this orchestration layer.
+
+### Bounded Conversational Agent Loop Threat Boundary
+
+Feature 14 introduces repeated model/tool interaction, which increases the
+risk of excessive agency, tool-output prompt injection, repeated side effects,
+and budget-reset mistakes.
+
+Current controls include:
+
+- model-visible tools continue to come only from the registered, enabled, and
+  explicitly authorized exposure set;
+- every executable proposal still passes through `ControlledAgentService`;
+- the loop itself has no direct `ToolExecutionService` execution path;
+- the loop has a hard maximum of eight model turns;
+- the loop has a separate hard maximum of eight tool calls;
+- tool-call consumption is cumulative across the complete loop;
+- when no tool budget remains, tools are removed from subsequent model
+  exposure;
+- an oversized proposed batch fails before provider execution;
+- validated `ToolResult` values are typed as `LLMToolResultMessage` before
+  becoming model context;
+- transcript validation rejects orphaned, incomplete, tool-name-mismatched, or
+  provider-call-ID-mismatched tool-result sequences;
+- internal platform execution `call_id` values are not serialized into the
+  Ollama tool-result message;
+- tool output remains untrusted context and does not grant execution authority;
+- approval-required plans still pause before execution;
+- approval resume reuses the frozen model decision rather than regenerating it;
+- loop continuations must be active values issued by the same service instance.
+
+Residual limitations remain explicit:
+
+- pending loop and approval state is process-local and in-memory;
+- process restart loses pending continuation state;
+- replay protection is not durable across processes or replicas;
+- approval grants still do not prove authenticated human identity;
+- sequential multi-tool execution is not transactional;
+- a later provider failure cannot roll back an earlier side effect;
+- automatic retry after execution begins is intentionally absent;
+- there is no global elapsed-time budget or rate limiter in this feature;
+- MCP, workflow execution, n8n, shell tools, filesystem tools, and network
+  tools are not introduced by this loop.
 
 ### MCP Trust Failure
 
@@ -426,8 +471,9 @@ Potential availability risks include:
 - database exhaustion;
 - resource exhaustion.
 
-Execution budgets and rate controls will be introduced alongside the
-relevant capabilities.
+The current bounded conversational agent loop now enforces separate hard
+model-turn and tool-call budgets. Elapsed-time budgets, rate controls,
+distributed quotas, and workflow-loop controls remain future hardening.
 
 ## Initial Security Invariants
 
@@ -707,8 +753,7 @@ runtime layers.
 The current Ollama runtime does not implement:
 
 - streaming model responses;
-- full conversational agent loops that serialize validated tool results back
-  to the model under an explicit tool-result message contract;
+- durable/distributed conversational-agent continuation state and recovery;
 - automatic retries;
 - provider authentication;
 - model routing;
@@ -764,7 +809,7 @@ The current retrieval foundation does not yet implement:
 - repository-defined encryption-at-rest controls;
 - approximate-nearest-neighbor indexes;
 - adversarial retrieval evaluations;
-- durable/full conversational agent runtime;
+- durable/distributed conversational agent runtime;
 - MCP integration;
 - workflow runtime.
 
@@ -796,7 +841,7 @@ materially changes:
 - model providers;
 - knowledge ingestion;
 - vector retrieval;
-- durable/full conversational agent execution;
+- durable/distributed conversational agent execution;
 - tools;
 - MCP;
 - workflow automation;

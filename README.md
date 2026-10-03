@@ -130,13 +130,34 @@ issued by the same service instance and consumes that continuation before
 provider execution, providing in-memory replay protection without re-running
 the LLM decision.
 
-This is deliberately not a full conversational agent loop. Pending
-continuations are in-memory and are lost on process restart. The tool batch is
-sequential, not transactional, and a later provider failure does not roll back
-an earlier side effect. Automatic retry after execution starts is intentionally
-absent. Tool-result messages, `MessageRole.TOOL`, tool-result round trips to the
-LLM, authenticated human approval lifecycle, MCP, workflows, n8n, shell tools,
-filesystem tools, and network tools remain outside this feature.
+The platform now also provides a bounded conversational agent loop through
+`BoundedAgentLoopService`. The loop composes `ControlledAgentService` rather
+than bypassing it, so every new model-proposed action still passes through the
+existing registered/enabled/authorized tool exposure, fresh platform execution
+identity, whole-plan preflight, approval, and result-identity boundaries.
+
+Conversation history now has explicit provider-neutral
+`LLMAssistantToolCallMessage` and `LLMToolResultMessage` values plus
+`MessageRole.TOOL`. Tool-call/result ordering, tool-name correlation, and
+provider call correlation are validated before a transcript can be sent back
+to an LLM. Ollama receives the provider-facing tool result, while the internal
+platform execution `call_id` is deliberately not serialized into the Ollama
+wire payload. Tool output remains untrusted model context and never becomes
+execution authority.
+
+The conversational loop has independent global ceilings of
+`MAX_AGENT_LOOP_MODEL_TURNS = 8` and `MAX_AGENT_LOOP_TOOL_CALLS = 8`.
+Tool-call consumption accumulates across model turns instead of resetting on
+each turn. Approval-required execution can pause and resume the exact frozen
+decision without model regeneration, while the existing process-local replay
+protections remain in force.
+
+The current loop is intentionally not durable or distributed. Pending
+continuations remain in memory and are lost on process restart. Tool batches
+remain sequential and non-transactional, with no rollback of earlier side
+effects and no automatic retry after execution begins. Authenticated HITL
+lifecycle, MCP, workflows, n8n, shell tools, filesystem tools, and network
+tools remain outside this feature.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
@@ -171,13 +192,15 @@ truthfulness.
 Retrieved evidence also remains untrusted data and may contain indirect prompt
 injection content.
 
-The repository now implements a bounded caller-supplied text ingestion
-foundation. It still does not implement filesystem or network source loaders,
-PDF/DOCX/HTML parsing, document replacement/reindex lifecycle orchestration, a
-public retrieval API, a concrete reranker adapter, tenant-aware retrieval
-authorization, presentation-layer citation rendering, semantic groundedness
-evaluation, executable tools, agents, MCP integrations, workflow execution, or
-AI observability backends.
+The repository now implements bounded caller-supplied text ingestion,
+controlled tool execution, inert LLM tool-call proposals, bounded single-turn
+agent orchestration, typed tool-result conversation history, and a bounded
+multi-turn conversational agent loop. It still does not implement filesystem or
+network source loaders, PDF/DOCX/HTML parsing, document replacement/reindex
+lifecycle orchestration, a public retrieval API, a concrete reranker adapter,
+tenant-aware retrieval authorization, presentation-layer citation rendering,
+semantic groundedness evaluation, MCP integrations, workflow execution,
+authenticated durable HITL state, or AI observability backends.
 
 ## Planned Capabilities
 
@@ -194,9 +217,9 @@ including:
 - tenant-aware retrieval authorization and data lifecycle controls;
 - presentation-layer citation rendering and automated semantic
   groundedness/citation-quality evaluation;
-- durable/full conversational agent execution;
-- full conversational agent orchestration that returns validated tool results
-  to the model through an explicit tool-result message contract;
+- durable/distributed conversational-agent execution and continuation recovery;
+- cross-process agent state, durable replay protection, and resumable
+  continuation recovery;
 - MCP integrations and a project-owned MCP server;
 - workflow automation;
 - human-in-the-loop approval;
