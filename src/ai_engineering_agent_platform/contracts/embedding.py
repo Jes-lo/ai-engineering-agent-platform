@@ -26,8 +26,15 @@ class EmbeddingRequest:
         if any(not text.strip() for text in self.texts):
             raise ValueError("embedding texts must not contain empty values")
 
-        if self.dimensions is not None and self.dimensions <= 0:
-            raise ValueError("dimensions must be positive")
+        if self.dimensions is not None:
+            if isinstance(self.dimensions, bool) or not isinstance(
+                self.dimensions,
+                int,
+            ):
+                raise ValueError("dimensions must be an integer")
+
+            if self.dimensions <= 0:
+                raise ValueError("dimensions must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +80,15 @@ class EmbeddingResponse:
         ):
             raise ValueError("all embedding vectors must have equal dimensions")
 
-        if self.input_tokens is not None and self.input_tokens < 0:
-            raise ValueError("input_tokens must be non-negative")
+        if self.input_tokens is not None:
+            if isinstance(self.input_tokens, bool) or not isinstance(
+                self.input_tokens,
+                int,
+            ):
+                raise ValueError("input_tokens must be an integer")
+
+            if self.input_tokens < 0:
+                raise ValueError("input_tokens must be non-negative")
 
     @property
     def dimensions(self) -> int:

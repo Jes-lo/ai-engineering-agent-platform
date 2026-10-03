@@ -17,21 +17,27 @@ The repository currently includes:
   vector stores, and controlled tool execution;
 - immutable provider-neutral request and response models;
 - a domain-level provider exception hierarchy;
-- a concrete Ollama adapter implementing the language-model provider
-  contract;
+- concrete Ollama adapters implementing the language-model and embedding
+  provider contracts;
 - non-streaming Ollama chat request and response mapping;
-- validated Ollama runtime configuration;
-- HTTP client and provider runtime composition with explicit lifecycle
-  ownership;
+- batch Ollama embedding request and response mapping through `/api/embed`;
+- optional embedding-dimension requests with validated response dimensions;
+- explicit `truncate=false` embedding requests to avoid silent input
+  truncation;
+- validated Ollama runtime configuration shared by LLM and embedding
+  capabilities;
+- shared HTTP-client construction with capability-specific provider runtime
+  composition and explicit lifecycle ownership;
 - normalized provider errors for timeout, transport, HTTP-status, malformed
   JSON, and malformed provider responses;
 - isolated Ollama adapter tests using mocked HTTP transport;
 - automated architectural dependency checks;
 - CI/CD and software supply-chain validation.
 
-Current model execution is available through the provider runtime boundary
-and uses Ollama's non-streaming chat API. The FastAPI application does not
-yet expose model-generation endpoints.
+Current model execution is available through provider runtime boundaries.
+LLM generation uses Ollama's non-streaming `/api/chat` endpoint, while
+embedding generation uses `/api/embed`. The FastAPI application does not yet
+expose public model-generation or embedding endpoints.
 
 Tool calling remains intentionally unsupported by the LLM contract. Non-empty
 provider `tool_calls` are rejected rather than executed or silently
@@ -48,7 +54,7 @@ including:
 
 - additional local and remote model adapters;
 - streaming and richer model-capability handling;
-- embedding-provider adapters;
+- additional embedding-provider adapters;
 - PostgreSQL and vector-search persistence;
 - retrieval-augmented generation;
 - retrieval and reranking pipelines;
@@ -96,8 +102,9 @@ Run local validation:
 
 ### Local Ollama Runtime
 
-Ollama is the first concrete LLM runtime integration. Ollama itself and model
-weights are not distributed by this repository.
+Ollama is the first concrete model-runtime integration and currently backs
+both LLM generation and embedding execution. Ollama itself and model weights
+are not distributed by this repository.
 
 Runtime configuration uses:
 
@@ -108,12 +115,18 @@ Runtime configuration uses:
 The configured base URL must be an absolute HTTP or HTTPS origin without
 embedded credentials, path components, query parameters, or fragments.
 
-The current adapter supports non-streaming chat generation only. The runtime
-owns creation and cleanup of the HTTP client, while `OllamaLLMProvider`
-remains independent of HTTP-client lifecycle management.
+The current LLM adapter supports non-streaming chat generation. The
+embedding adapter supports batch `/api/embed` requests, optional requested
+dimensions, response-shape validation, and explicit `truncate=false`
+behavior.
 
-For an opt-in real-runtime validation procedure, see
-[Local Ollama Smoke Test](docs/operations/local-ollama-smoke-test.md).
+A shared Ollama HTTP-client factory consumes the validated runtime settings.
+Capability-specific runtimes own client cleanup, while
+`OllamaLLMProvider` and `OllamaEmbeddingProvider` remain independent of
+HTTP-client lifecycle management.
+
+For opt-in real-runtime validation procedures, see
+[Local Ollama Smoke Tests](docs/operations/local-ollama-smoke-test.md).
 
 ## Continuous Integration
 

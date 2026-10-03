@@ -200,3 +200,53 @@ def test_embedding_provider_supports_structural_async_typing() -> None:
     assert len(response.embeddings) == 2
     assert response.dimensions == 3
     assert response.input_tokens == 2
+
+
+@pytest.mark.parametrize(
+    "dimensions",
+    [
+        True,
+        1.5,
+        "256",
+    ],
+)
+def test_embedding_request_requires_integer_dimensions(
+    dimensions: object,
+) -> None:
+    """Requested dimensions must be real integers, never bool/coerced values."""
+    with pytest.raises(
+        ValueError,
+        match="dimensions must be an integer",
+    ):
+        EmbeddingRequest(
+            model="model",
+            texts=("text",),
+            dimensions=dimensions,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "input_tokens",
+    [
+        True,
+        1.5,
+        "7",
+    ],
+)
+def test_embedding_response_requires_integer_usage(
+    input_tokens: object,
+) -> None:
+    """Provider usage accounting must be represented by real integers."""
+    with pytest.raises(
+        ValueError,
+        match="input_tokens must be an integer",
+    ):
+        EmbeddingResponse(
+            model="model",
+            embeddings=(
+                EmbeddingVector(
+                    values=(0.1, 0.2),
+                ),
+            ),
+            input_tokens=input_tokens,  # type: ignore[arg-type]
+        )
