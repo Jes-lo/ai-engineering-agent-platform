@@ -32,8 +32,8 @@ The architecture prioritizes:
 
 ## Current Implementation
 
-The current repository implements the foundational platform layers rather
-than the complete target architecture.
+The current repository implements foundational platform layers plus the first
+concrete LLM runtime integration.
 
 Implemented capabilities currently include:
 
@@ -44,14 +44,29 @@ Implemented capabilities currently include:
   stores, and tools;
 - immutable provider-neutral request, response, and value objects;
 - a domain-level provider exception hierarchy;
+- a concrete `OllamaLLMProvider` adapter;
+- provider-specific mapping between platform LLM contracts and Ollama chat
+  payloads;
+- non-streaming model generation through Ollama `/api/chat`;
+- normalized finish reasons and token-usage metadata;
+- explicit rejection of unsupported Ollama tool calls;
+- validated Ollama base-URL and timeout configuration;
+- runtime composition for HTTP-client creation, provider construction, and
+  deterministic cleanup;
+- normalized timeout, transport, HTTP-status, JSON, and provider-response
+  failures;
+- mocked-transport adapter tests that do not require a running model server;
+- an opt-in manual smoke-test procedure for a real local Ollama runtime;
 - architectural dependency checks protecting the contracts and domain
   layers;
 - CI/CD and software supply-chain validation.
 
-The `adapters` package currently establishes the implementation boundary,
-but no provider-specific adapters have been added yet.
+Provider-neutral contracts remain independent of Ollama-specific
+implementation details. HTTP execution is contained by the adapter/runtime
+boundary rather than spread throughout application code.
 
-There is currently no model invocation, persistent database, production
+There is currently no public model-generation API endpoint, streaming model
+generation, embedding-provider adapter, persistent database, production
 vector store, RAG pipeline, agent runtime, executable tool integration, MCP
 integration, workflow runtime, or AI observability backend.
 
@@ -113,22 +128,54 @@ Responsibilities are expected to include:
 
 ### Model Gateway
 
-The model gateway will separate platform behavior from specific model
-providers.
+The model gateway separates platform behavior from specific model providers.
 
-Planned responsibilities include:
+The current implementation provides:
 
-- model-provider adapters;
-- model configuration;
-- generation;
+- a provider-neutral `LLMProvider` contract;
+- an Ollama-specific adapter behind that contract;
+- validated model-runtime configuration;
+- non-streaming chat generation;
+- generation controls for temperature and maximum output tokens;
+- finish-reason normalization;
+- token-usage normalization when supplied by the provider;
+- normalized provider availability and execution errors;
+- HTTP-client lifecycle composition outside the provider implementation.
+
+The current dependency flow is:
+
+    LLMRequest
+        |
+        v
+    runtime composition
+        |
+        v
+    OllamaLLMProvider
+        |
+        v
+    Ollama request mapping
+        |
+        v
+    POST /api/chat
+        |
+        v
+    Ollama response mapping
+        |
+        v
+    LLMResponse
+
+Provider-specific behavior remains behind adapter and runtime boundaries.
+Core contracts and domain models do not import Ollama or HTTPX2.
+
+Remaining model-gateway capabilities include:
+
 - streaming;
-- model capability metadata;
-- timeout and retry policies;
-- usage metadata;
-- telemetry.
-
-Initial implementation may use a local model runtime, but core
-application logic must not depend directly on that runtime.
+- additional model providers;
+- richer model capability metadata;
+- explicit retry policy;
+- model routing;
+- telemetry and AI observability;
+- public authenticated and authorized generation APIs.
 
 ### Embeddings
 

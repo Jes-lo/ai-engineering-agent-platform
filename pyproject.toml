@@ -7,6 +7,7 @@ requires-python = ">=3.13,<3.14"
 license = "LicenseRef-Proprietary"
 dependencies = [
     "fastapi>=0.142.2,<0.143",
+    "httpx2>=2.13.1,<2.14",
     "pydantic-settings>=2.15.0,<2.16",
     "uvicorn>=0.54.0,<0.55",
 ]
@@ -46,7 +47,6 @@ select = [
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1,<2.14",
     "mypy>=2.4.0,<2.5",
     "pytest>=9.1.1,<9.2",
     "ruff>=0.16.10,<0.17",

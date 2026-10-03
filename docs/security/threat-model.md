@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.1
+Version: 0.2
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -336,23 +336,72 @@ The following rules should remain true as the project evolves:
 12. planned security controls must become executable tests when the
     corresponding functionality is implemented.
 
+## Current LLM Runtime Security Posture
+
+The platform-to-model-provider trust boundary is now active for the Ollama
+LLM adapter.
+
+Current controls include:
+
+- a default Ollama base URL restricted to loopback
+  (`http://127.0.0.1:11434`);
+- configuration validation requiring an absolute HTTP or HTTPS origin;
+- rejection of embedded URL credentials;
+- rejection of URL paths, query parameters, and fragments in the configured
+  provider origin;
+- a positive finite request timeout;
+- provider-specific HTTP execution isolated behind the adapter boundary;
+- normalized timeout and transport failures;
+- normalized HTTP-status failures;
+- provider response validation before conversion to platform domain models;
+- rejection of malformed JSON and malformed response structures;
+- rejection of non-empty Ollama `tool_calls` while platform LLM tool calling
+  remains unsupported;
+- preservation of underlying exception causes without copying remote response
+  bodies into normalized platform-error messages;
+- runtime-owned HTTP-client creation and cleanup;
+- mocked-transport tests that do not require external network access.
+
+The configured model endpoint is still a trust boundary. Configuration can
+point to non-loopback HTTP or HTTPS origins, so operators are responsible for
+selecting an intended endpoint. The current feature does not implement a
+network-destination allowlist, provider authentication, certificate pinning,
+automatic retries, or outbound network policy enforcement.
+
+Model output remains untrusted data. Successful model generation does not
+authorize tool execution, command execution, privileged actions, or access to
+protected resources.
+
 ## Current Limitations
 
-The repository currently contains a Python/FastAPI application runtime,
-health and readiness endpoints, and provider-neutral contracts for language
-models, embeddings, rerankers, vector stores, and tools.
+The repository now contains a concrete Ollama LLM adapter and runtime
+composition capable of non-streaming model invocation through the existing
+provider-neutral LLM contract.
 
-These contracts define internal boundaries and validated data structures;
-they do not themselves invoke models, access external providers, persist
-vectors, or execute tools.
+The provider-neutral contracts themselves remain free of provider-specific
+execution behavior. Ollama-specific mapping, HTTP execution, configuration,
+error normalization, and client lifecycle are contained by adapter and
+runtime layers.
 
-No concrete model-provider adapter, model execution, persistent database,
-production vector-store integration, tool execution, agent runtime, MCP
-integration, or workflow runtime exists yet.
+The current LLM runtime does not implement:
 
-Many AI-specific attack surfaces documented above therefore remain
-anticipatory. Controls for those attack surfaces must become executable and
-testable as the corresponding runtime capabilities are introduced.
+- streaming model responses;
+- LLM tool-calling semantics or tool execution;
+- automatic retries;
+- provider authentication;
+- model routing;
+- public model-generation API endpoints;
+- per-user or per-tenant model authorization;
+- AI-specific telemetry or model-operation tracing.
+
+There is also no embedding-provider adapter, persistent database, production
+vector-store integration, RAG pipeline, agent runtime, MCP integration, or
+workflow runtime.
+
+AI-specific attack surfaces associated with retrieval, tools, agents, MCP,
+workflows, and observability therefore remain anticipatory. Controls for
+those attack surfaces must become executable and testable as the
+corresponding runtime capabilities are introduced.
 
 Each future feature must update this threat model when it materially
 changes:

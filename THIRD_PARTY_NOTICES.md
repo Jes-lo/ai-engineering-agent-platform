@@ -19,15 +19,15 @@ The project currently uses the following direct software dependencies.
 | Uvicorn | 0.54.x | ASGI application server | BSD-3-Clause |
 | pydantic-settings | 2.15.x | Runtime configuration | MIT |
 | pytest | 9.1.x | Automated testing | MIT |
-| HTTPX2 | 2.13.x | HTTP testing client | BSD-3-Clause |
+| HTTPX2 | 2.13.x | Runtime HTTP client and adapter testing | BSD-3-Clause |
 | Ruff | 0.16.x | Formatting and static linting | MIT |
 | mypy | 2.4.x | Static type checking | MIT |
 
 Exact resolved dependency versions, including transitive dependencies,
 are recorded in `uv.lock`.
 
-Automated SBOM and complete dependency-license inventory generation will
-be introduced alongside the corresponding software supply-chain controls.
+Automated SBOM and complete dependency-license inventory generation are
+part of the repository software supply-chain controls.
 
 ## External Services and Tooling
 
@@ -38,6 +38,12 @@ Such references do not imply ownership, sponsorship, endorsement, or
 affiliation.
 
 Their use remains subject to their respective licenses and terms.
+
+Ollama is the current concrete model-runtime API integration. The repository
+interacts with Ollama through its HTTP API but does not distribute Ollama or
+model weights. Ollama installations, hosted services, and model artifacts
+remain subject to their respective upstream licenses, terms, and usage
+conditions.
 
 ## AI Models and Model Providers
 
