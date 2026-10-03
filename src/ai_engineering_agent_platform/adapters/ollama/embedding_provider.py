@@ -1,17 +1,17 @@
-"""Ollama implementation of the platform LLM provider contract."""
+"""Ollama implementation of the platform embedding provider contract."""
 
 import httpx2
 
+from ai_engineering_agent_platform.adapters.ollama.embedding_mapping import (
+    build_ollama_embedding_payload,
+    parse_ollama_embedding_response,
+)
 from ai_engineering_agent_platform.adapters.ollama.http_errors import (
     raise_ollama_http_status_error,
 )
-from ai_engineering_agent_platform.adapters.ollama.mapping import (
-    build_ollama_chat_payload,
-    parse_ollama_chat_response,
-)
 from ai_engineering_agent_platform.contracts import (
-    LLMRequest,
-    LLMResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
     ProviderDescriptor,
     ProviderKind,
 )
@@ -21,12 +21,12 @@ from ai_engineering_agent_platform.domain import (
 )
 
 
-class OllamaLLMProvider:
-    """Generate LLM responses through an injected Ollama HTTP client."""
+class OllamaEmbeddingProvider:
+    """Generate embeddings through an injected Ollama HTTP client."""
 
     _descriptor = ProviderDescriptor(
         name="ollama",
-        kind=ProviderKind.LLM,
+        kind=ProviderKind.EMBEDDING,
     )
 
     def __init__(
@@ -41,21 +41,23 @@ class OllamaLLMProvider:
         """Return stable provider identity metadata."""
         return self._descriptor
 
-    async def generate(
+    async def embed(
         self,
-        request: LLMRequest,
-    ) -> LLMResponse:
-        """Generate one normalized non-streaming Ollama chat response."""
+        request: EmbeddingRequest,
+    ) -> EmbeddingResponse:
+        """Generate one normalized Ollama embedding response."""
         try:
             response = await self._client.post(
-                "/api/chat",
-                json=build_ollama_chat_payload(request),
+                "/api/embed",
+                json=build_ollama_embedding_payload(request),
             )
         except httpx2.TimeoutException as exc:
-            raise ProviderUnavailableError("Ollama request timed out") from exc
+            raise ProviderUnavailableError(
+                "Ollama embedding request timed out"
+            ) from exc
         except httpx2.RequestError as exc:
             raise ProviderUnavailableError(
-                "Ollama request failed at the transport layer"
+                "Ollama embedding request failed at the transport layer"
             ) from exc
 
         try:
@@ -66,6 +68,11 @@ class OllamaLLMProvider:
         try:
             payload = response.json()
         except ValueError as exc:
-            raise ProviderExecutionError("Ollama response was not valid JSON") from exc
+            raise ProviderExecutionError(
+                "Ollama embedding response was not valid JSON"
+            ) from exc
 
-        return parse_ollama_chat_response(payload)
+        return parse_ollama_embedding_response(
+            payload,
+            request,
+        )

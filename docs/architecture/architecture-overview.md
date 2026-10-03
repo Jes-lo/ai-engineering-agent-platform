@@ -32,8 +32,8 @@ The architecture prioritizes:
 
 ## Current Implementation
 
-The current repository implements foundational platform layers plus the first
-concrete LLM runtime integration.
+The current repository implements foundational platform layers plus concrete
+LLM and embedding runtime integrations through Ollama.
 
 Implemented capabilities currently include:
 
@@ -45,14 +45,19 @@ Implemented capabilities currently include:
 - immutable provider-neutral request, response, and value objects;
 - a domain-level provider exception hierarchy;
 - a concrete `OllamaLLMProvider` adapter;
-- provider-specific mapping between platform LLM contracts and Ollama chat
-  payloads;
+- a concrete `OllamaEmbeddingProvider` adapter;
+- provider-specific mapping between platform contracts and Ollama chat and
+  embedding payloads;
 - non-streaming model generation through Ollama `/api/chat`;
+- batch embedding generation through Ollama `/api/embed`;
+- optional requested embedding dimensions with response-dimension validation;
+- explicit embedding `truncate=false` requests to reject oversized inputs
+  rather than silently truncating them;
 - normalized finish reasons and token-usage metadata;
 - explicit rejection of unsupported Ollama tool calls;
 - validated Ollama base-URL and timeout configuration;
-- runtime composition for HTTP-client creation, provider construction, and
-  deterministic cleanup;
+- shared Ollama HTTP-client construction plus capability-specific runtime
+  composition, provider construction, and deterministic cleanup;
 - normalized timeout, transport, HTTP-status, JSON, and provider-response
   failures;
 - mocked-transport adapter tests that do not require a running model server;
@@ -65,10 +70,10 @@ Provider-neutral contracts remain independent of Ollama-specific
 implementation details. HTTP execution is contained by the adapter/runtime
 boundary rather than spread throughout application code.
 
-There is currently no public model-generation API endpoint, streaming model
-generation, embedding-provider adapter, persistent database, production
-vector store, RAG pipeline, agent runtime, executable tool integration, MCP
-integration, workflow runtime, or AI observability backend.
+There is currently no public model-generation or embedding API endpoint,
+streaming model generation, persistent database, production vector store,
+RAG pipeline, agent runtime, executable tool integration, MCP integration,
+workflow runtime, or AI observability backend.
 
 ## High-Level Architecture
 
@@ -179,10 +184,52 @@ Remaining model-gateway capabilities include:
 
 ### Embeddings
 
-Embedding generation will be treated as an independent capability.
+Embedding generation is implemented as an independent provider capability.
 
-The platform should be able to replace embedding implementations
-without rewriting the retrieval domain.
+The current implementation provides:
+
+- a provider-neutral `EmbeddingProvider` contract;
+- immutable `EmbeddingRequest`, `EmbeddingVector`, and `EmbeddingResponse`
+  models;
+- an Ollama-specific `OllamaEmbeddingProvider`;
+- batch request mapping to Ollama `/api/embed`;
+- optional requested dimensionality;
+- strict validation of vector count, dimensions, numeric values, finite
+  values, model identity, and token accounting;
+- explicit `truncate=false` requests to prevent silent truncation;
+- normalized timeout, transport, HTTP-status, malformed-JSON, and malformed
+  response failures;
+- shared Ollama HTTP-client construction with an embedding-specific runtime
+  responsible for lifecycle cleanup;
+- mocked transport tests that do not require a running Ollama instance;
+- opt-in real-runtime validation against a separately installed local
+  embedding model.
+
+The current dependency flow is:
+
+    EmbeddingRequest
+        |
+        v
+    runtime composition
+        |
+        v
+    OllamaEmbeddingProvider
+        |
+        v
+    Ollama embedding request mapping
+        |
+        v
+    POST /api/embed
+        |
+        v
+    Ollama embedding response mapping
+        |
+        v
+    EmbeddingResponse
+
+Embedding implementations remain replaceable behind the provider contract.
+No persistent vector storage, indexing, retrieval, or RAG behavior has been
+introduced yet.
 
 ### Knowledge and RAG
 

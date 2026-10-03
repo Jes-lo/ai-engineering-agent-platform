@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 0.2
+Version: 0.3
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -336,10 +336,10 @@ The following rules should remain true as the project evolves:
 12. planned security controls must become executable tests when the
     corresponding functionality is implemented.
 
-## Current LLM Runtime Security Posture
+## Current Ollama Runtime Security Posture
 
-The platform-to-model-provider trust boundary is now active for the Ollama
-LLM adapter.
+The platform-to-model-provider and platform-to-embedding-provider trust
+boundaries are now active through the Ollama LLM and embedding adapters.
 
 Current controls include:
 
@@ -350,7 +350,13 @@ Current controls include:
 - rejection of URL paths, query parameters, and fragments in the configured
   provider origin;
 - a positive finite request timeout;
-- provider-specific HTTP execution isolated behind the adapter boundary;
+- provider-specific HTTP execution isolated behind adapter boundaries;
+- a shared HTTP-client factory with runtime-owned lifecycle management;
+- separate LLM and embedding provider contracts;
+- embedding requests sent with `truncate=false` so oversized inputs are
+  rejected instead of silently truncated;
+- embedding response cardinality, dimensionality, numeric type, finite-value,
+  model, and token-accounting validation before domain use;
 - normalized timeout and transport failures;
 - normalized HTTP-status failures;
 - provider response validation before conversion to platform domain models;
@@ -360,13 +366,24 @@ Current controls include:
 - preservation of underlying exception causes without copying remote response
   bodies into normalized platform-error messages;
 - runtime-owned HTTP-client creation and cleanup;
+- provider implementations that do not own or close injected clients;
 - mocked-transport tests that do not require external network access.
 
-The configured model endpoint is still a trust boundary. Configuration can
+The configured Ollama endpoint is still a trust boundary. Configuration can
 point to non-loopback HTTP or HTTPS origins, so operators are responsible for
-selecting an intended endpoint. The current feature does not implement a
-network-destination allowlist, provider authentication, certificate pinning,
-automatic retries, or outbound network policy enforcement.
+selecting an intended endpoint. LLM prompts and embedding inputs sent to a
+non-local endpoint may cross an external trust boundary and must be treated
+accordingly.
+
+Embedding batches can aggregate multiple input texts into one provider
+request. Sensitive, confidential, personal, or tenant-isolated content must
+not be sent to an embedding provider without the corresponding authorization
+and data-handling controls.
+
+The current feature does not implement a network-destination allowlist,
+provider authentication, certificate pinning, automatic retries, outbound
+network policy enforcement, per-user provider authorization, or provider-side
+data-retention controls.
 
 Model output remains untrusted data. Successful model generation does not
 authorize tool execution, command execution, privileged actions, or access to
@@ -374,16 +391,16 @@ protected resources.
 
 ## Current Limitations
 
-The repository now contains a concrete Ollama LLM adapter and runtime
-composition capable of non-streaming model invocation through the existing
-provider-neutral LLM contract.
+The repository now contains concrete Ollama LLM and embedding adapters with
+runtime composition capable of non-streaming model invocation and batch
+embedding generation through the existing provider-neutral contracts.
 
 The provider-neutral contracts themselves remain free of provider-specific
 execution behavior. Ollama-specific mapping, HTTP execution, configuration,
 error normalization, and client lifecycle are contained by adapter and
 runtime layers.
 
-The current LLM runtime does not implement:
+The current Ollama runtime does not implement:
 
 - streaming model responses;
 - LLM tool-calling semantics or tool execution;
@@ -394,9 +411,10 @@ The current LLM runtime does not implement:
 - per-user or per-tenant model authorization;
 - AI-specific telemetry or model-operation tracing.
 
-There is also no embedding-provider adapter, persistent database, production
-vector-store integration, RAG pipeline, agent runtime, MCP integration, or
-workflow runtime.
+There is still no persistent database, production vector-store integration,
+embedding index, retrieval pipeline, RAG pipeline, agent runtime, MCP
+integration, or workflow runtime. Embeddings are generated in memory and are
+not persisted by this feature.
 
 AI-specific attack surfaces associated with retrieval, tools, agents, MCP,
 workflows, and observability therefore remain anticipatory. Controls for

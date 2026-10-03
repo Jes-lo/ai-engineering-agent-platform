@@ -1,11 +1,11 @@
-# Local Ollama Smoke Test
+# Local Ollama Smoke Tests
 
 ## Purpose
 
-This procedure performs an opt-in integration smoke test against a real
+This procedure performs opt-in integration smoke tests against a real
 Ollama installation.
 
-It validates the complete local LLM path:
+The LLM procedure validates the complete local generation path:
 
     Settings
         |
@@ -199,3 +199,146 @@ against an already-installed local Ollama model.
 
 The model used for a developer smoke run is not a runtime dependency of this
 repository, is not distributed by the project, and is not required by CI.
+
+
+## Embedding Runtime Smoke Test
+
+Embedding validation is also opt-in and remains separate from CI.
+
+Use an already-installed model that advertises Ollama's `embedding`
+capability. Do not assume that a text-generation model can generate
+embeddings.
+
+Expose the selected local model name only to the smoke-test process:
+
+    export AI_PLATFORM_EMBEDDING_SMOKE_MODEL="<installed-embedding-model>"
+
+The repository does not require one specific embedding model.
+
+Run:
+
+    uv run python - <<'PY'
+    import asyncio
+    import math
+    import os
+
+    from ai_engineering_agent_platform.config import Settings
+    from ai_engineering_agent_platform.contracts import (
+        EmbeddingRequest,
+        ProviderKind,
+    )
+    from ai_engineering_agent_platform.runtime import (
+        ollama_embedding_runtime,
+    )
+
+
+    async def main() -> None:
+        model = os.environ[
+            "AI_PLATFORM_EMBEDDING_SMOKE_MODEL"
+        ]
+
+        settings = Settings(
+            ollama_base_url="http://127.0.0.1:11434",
+            ollama_request_timeout_seconds=120.0,
+        )
+
+        request = EmbeddingRequest(
+            model=model,
+            texts=(
+                "Synthetic embedding smoke input alpha.",
+                "Synthetic embedding smoke input beta.",
+            ),
+        )
+
+        async with ollama_embedding_runtime(
+            settings
+        ) as provider:
+            assert provider.descriptor.name == "ollama"
+            assert (
+                provider.descriptor.kind
+                is ProviderKind.EMBEDDING
+            )
+
+            response = await provider.embed(request)
+
+        if len(response.embeddings) != 2:
+            raise SystemExit(
+                "FAIL: expected one vector per input"
+            )
+
+        if response.dimensions <= 0:
+            raise SystemExit(
+                "FAIL: invalid embedding dimensionality"
+            )
+
+        for embedding in response.embeddings:
+            if embedding.dimensions != response.dimensions:
+                raise SystemExit(
+                    "FAIL: inconsistent dimensions"
+                )
+
+            if not all(
+                math.isfinite(value)
+                for value in embedding.values
+            ):
+                raise SystemExit(
+                    "FAIL: non-finite embedding value"
+                )
+
+        print(f"provider=ollama")
+        print(f"model={response.model}")
+        print(
+            f"vectors={len(response.embeddings)}"
+        )
+        print(
+            f"dimensions={response.dimensions}"
+        )
+        print(
+            f"input_tokens={response.input_tokens}"
+        )
+        print(
+            "PASS: real Ollama embedding smoke test"
+        )
+
+
+    asyncio.run(main())
+    PY
+
+A successful embedding run demonstrates that:
+
+- validated settings can construct the embedding runtime;
+- `OllamaEmbeddingProvider` can invoke `/api/embed`;
+- batch inputs produce one normalized vector per input;
+- vector values are finite;
+- all returned vectors have consistent dimensions;
+- token accounting is normalized when Ollama supplies it;
+- runtime cleanup completes normally.
+
+Optional requested dimensions can be tested separately by passing
+`dimensions=<positive-integer>` to `EmbeddingRequest`. The returned vector
+dimensions must match the requested value or the adapter rejects the response.
+
+The embedding adapter deliberately sends `truncate=false`. Inputs that exceed
+the provider/model context should therefore fail instead of being silently
+truncated.
+
+### Feature 4 Validation Record
+
+Feature 4 development included a successful real-runtime smoke validation
+using a separately installed local `qwen3-embedding:0.6b` model through
+Ollama.
+
+That development validation observed:
+
+- Ollama advertised the `embedding` capability;
+- batch embedding generation succeeded;
+- the model returned 1024 dimensions with its default configuration;
+- an explicit request for 256 dimensions returned 256-dimensional vectors;
+- the complete
+  `Settings -> runtime -> OllamaEmbeddingProvider -> EmbeddingResponse`
+  path succeeded;
+- the model weights remained outside the repository.
+
+The named model records development evidence only. It is not required by CI,
+is not distributed by this repository, and is not a mandatory runtime
+dependency.

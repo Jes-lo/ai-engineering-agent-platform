@@ -49,8 +49,9 @@ conditions.
 
 No AI model is distributed with this repository at this stage.
 
-Models, embedding models, rerankers, model providers, and related
-artifacts will be documented individually before they are introduced.
+Models, embedding models, rerankers, model providers, and related artifacts
+must be documented when they become project dependencies or are used as named
+validation artifacts.
 
 For each applicable component, this project will track:
 
@@ -63,6 +64,29 @@ For each applicable component, this project will track:
 - relevant redistribution or commercial-use restrictions.
 
 Model weights are not assumed to be covered by the repository license.
+
+### Development Validation Model: Qwen3-Embedding-0.6B
+
+Feature 4 development included an opt-in local embedding smoke validation
+using `qwen3-embedding:0.6b` through a separately installed Ollama runtime.
+
+Provenance recorded for that validation artifact:
+
+- upstream model: `Qwen/Qwen3-Embedding-0.6B`;
+- upstream organization: Qwen;
+- intended project use: local development and embedding integration
+  validation;
+- upstream model metadata declares the Apache-2.0 license;
+- model weights are installed outside this repository;
+- the repository does not redistribute the model weights;
+- the model is not required by CI;
+- the model is not a mandatory runtime dependency of the platform;
+- a different compatible embedding model may be used through the
+  provider-neutral contract.
+
+The upstream license, model terms, runtime terms, and any later changes remain
+the responsibility of their respective third-party owners. Repository
+licensing does not replace or modify those terms.
 
 ## Datasets
 

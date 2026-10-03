@@ -1,4 +1,4 @@
-"""Runtime composition for LLM provider implementations."""
+"""Runtime composition for embedding provider implementations."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import httpx2
 
 from ai_engineering_agent_platform.adapters.ollama import (
-    OllamaLLMProvider,
+    OllamaEmbeddingProvider,
 )
 from ai_engineering_agent_platform.config import Settings
 from ai_engineering_agent_platform.runtime.ollama import (
@@ -15,18 +15,18 @@ from ai_engineering_agent_platform.runtime.ollama import (
 
 
 @asynccontextmanager
-async def ollama_llm_runtime(
+async def ollama_embedding_runtime(
     settings: Settings,
     *,
     transport: httpx2.AsyncBaseTransport | None = None,
-) -> AsyncIterator[OllamaLLMProvider]:
-    """Yield an Ollama provider and own its HTTP-client lifecycle."""
+) -> AsyncIterator[OllamaEmbeddingProvider]:
+    """Yield an Ollama embedding provider and own its client lifecycle."""
     client = create_ollama_http_client(
         settings,
         transport=transport,
     )
 
     try:
-        yield OllamaLLMProvider(client)
+        yield OllamaEmbeddingProvider(client)
     finally:
         await client.aclose()
