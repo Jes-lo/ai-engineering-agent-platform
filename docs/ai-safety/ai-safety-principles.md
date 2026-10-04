@@ -98,10 +98,7 @@ Sequential multi-tool execution is not atomic. Earlier successful side effects
 are not rolled back if a later provider execution fails, and automatic retries
 after execution starts remain intentionally absent.
 
-Future hardening includes durable/distributed continuation state, authenticated
-human-approval lifecycle controls, elapsed-time/rate budgets, and stronger
-audit/observability support. Concrete MCP wire transports and workflow
-capabilities must preserve these same authority boundaries when introduced.
+Future hardening includes durable/distributed continuation state, authenticated human-approval lifecycle controls, elapsed-time/rate budgets, stronger audit/observability support, outbound remote MCP wire transport, MCP resources/prompts, and workflow capabilities. Those additions must preserve the same authority boundaries.
 
 ## 7. Minimize Sensitive Context
 
@@ -125,22 +122,32 @@ boundaries.
 Connecting a service does not automatically authorize it to receive
 all platform data.
 
-The transport-neutral MCP foundation applies the same rule to external
-capabilities. Remote discovery is data, not authority. Only explicitly bound
-remote tools can enter the platform-owned tool surface, and remote descriptions
-do not replace platform-controlled descriptions.
+The MCP boundary applies the same rule to both remote capabilities and
+project-owned tool exposure: protocol data is not authority. Remote discovery
+remains untrusted, explicitly bound, and subordinate to platform-owned tool
+definitions and execution policy.
 
-Project-owned MCP exposure is also capability-limited: tools must be explicitly
+The concrete inbound Streamable HTTP server authenticates Bearer material
+through an injected `TokenVerifier`, but authentication is only the first
+gate. `MCPAccessPolicy` converts verified token scopes through platform-owned
+mappings into execution authorization. Token claims cannot self-assert a tool
+allowlist, and the wire layer cannot manufacture approval grants.
+
+Project-owned MCP exposure remains capability-limited. Tools must be explicitly
 exported, enabled, and authorized, while approval-required tools remain
 excluded. External request identifiers do not become platform execution
-identities.
+identities, and tool execution still crosses `ToolExecutionService`.
 
-The current `server_name` binding is not authenticated identity. Any future MCP
-wire transport must authenticate its peer and derive execution authorization
-from trusted platform identity and policy. A remote client must never be
-allowed to self-assert an allowlist or approval grant merely through protocol
-input. Remote MCP results remain untrusted context and must not override system
-policy or grant later tool authority.
+MCP is disabled by default. Production issuer/resource URLs require HTTPS,
+non-local hosts require explicit transport-security configuration, and request
+body size is bounded. These controls reduce accidental exposure but do not
+replace a production identity provider, TLS termination, rate limiting,
+monitoring, or durable human approval.
+
+Remote MCP results and protocol content remain untrusted context. They must not
+override system policy, expand later tool authority, or be interpreted as
+trusted instructions merely because they arrived over an authenticated
+transport.
 
 ## 9. Evaluate AI Behavior
 

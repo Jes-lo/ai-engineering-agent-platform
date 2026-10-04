@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     docs_enabled: bool = True
 
+    mcp_enabled: bool = False
+    mcp_host: str = "127.0.0.1"
+    mcp_issuer_url: str | None = None
+    mcp_resource_server_url: str | None = None
+    mcp_required_scopes: tuple[str, ...] = ("mcp:tools",)
+    mcp_max_request_body_size: int = 1024 * 1024
+
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_request_timeout_seconds: float = 120.0
 
@@ -43,6 +50,23 @@ class Settings(BaseSettings):
     postgres_pool_min_size: int = 1
     postgres_pool_max_size: int = 5
     postgres_pool_timeout_seconds: float = 10.0
+
+    @field_validator(
+        "mcp_max_request_body_size",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_mcp_numeric_settings(
+        cls,
+        value: object,
+    ) -> object:
+        """Reject booleans before MCP numeric coercion."""
+        del cls
+
+        if isinstance(value, bool):
+            raise ValueError("MCP numeric settings must not be boolean")
+
+        return value
 
     @field_validator(
         "postgres_port",
@@ -92,6 +116,85 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ollama_request_timeout_seconds must be positive and finite"
             )
+
+        if not self.mcp_host.strip():
+            raise ValueError("mcp_host must not be empty")
+
+        if not self.mcp_required_scopes:
+            raise ValueError("mcp_required_scopes must not be empty")
+
+        if any(not scope.strip() for scope in self.mcp_required_scopes):
+            raise ValueError("mcp_required_scopes must not contain empty values")
+
+        if len(self.mcp_required_scopes) != len(set(self.mcp_required_scopes)):
+            raise ValueError("mcp_required_scopes must contain unique values")
+
+        if self.mcp_max_request_body_size <= 0:
+            raise ValueError("mcp_max_request_body_size must be positive")
+
+        for field_name, value in (
+            (
+                "mcp_issuer_url",
+                self.mcp_issuer_url,
+            ),
+            (
+                "mcp_resource_server_url",
+                self.mcp_resource_server_url,
+            ),
+        ):
+            if value is None:
+                continue
+
+            parsed_mcp_url = urlsplit(value)
+
+            if (
+                parsed_mcp_url.scheme
+                not in {
+                    "http",
+                    "https",
+                }
+                or parsed_mcp_url.hostname is None
+            ):
+                raise ValueError(f"{field_name} must be an absolute HTTP(S) URL")
+
+            try:
+                _ = parsed_mcp_url.port
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must contain a valid port") from exc
+
+            if (
+                parsed_mcp_url.username is not None
+                or parsed_mcp_url.password is not None
+            ):
+                raise ValueError(f"{field_name} must not contain embedded credentials")
+
+            if parsed_mcp_url.query or parsed_mcp_url.fragment:
+                raise ValueError(f"{field_name} must not contain query or fragment")
+
+        if self.mcp_enabled:
+            if self.mcp_issuer_url is None:
+                raise ValueError("mcp_issuer_url is required when MCP is enabled")
+
+            if self.mcp_resource_server_url is None:
+                raise ValueError(
+                    "mcp_resource_server_url is required when MCP is enabled"
+                )
+
+            resource_url = urlsplit(self.mcp_resource_server_url)
+
+            if resource_url.path != "/mcp":
+                raise ValueError("mcp_resource_server_url must target /mcp")
+
+            if self.environment == "production":
+                issuer_url = urlsplit(self.mcp_issuer_url)
+
+                if issuer_url.scheme != "https":
+                    raise ValueError("production mcp_issuer_url must use HTTPS")
+
+                if resource_url.scheme != "https":
+                    raise ValueError(
+                        "production mcp_resource_server_url must use HTTPS"
+                    )
 
         if not self.postgres_host.strip():
             raise ValueError("postgres_host must not be empty")

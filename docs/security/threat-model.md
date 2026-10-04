@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.4
+Version: 1.5
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -344,62 +344,79 @@ Residual limitations remain explicit:
 
 ### MCP Trust Failure
 
-External MCP discovery, metadata, tool results, and future protocol messages are
-untrusted input. Connecting or configuring an MCP server must not implicitly
-authorize every capability it exposes.
+MCP introduces two distinct trust boundaries: remote capability consumption and
+project-owned capability exposure.
 
-The current transport-neutral foundation applies these controls:
+Remote MCP discovery, metadata, descriptions, schemas, and results remain
+untrusted. The transport-neutral client foundation therefore continues to
+require explicit `MCPToolBinding` entries, ignores unbound discovered tools,
+rejects duplicate discovered names, retains platform-owned local definitions,
+and requires discovered parameter schemas to match the pinned local schema.
+The configured remote `server_name` remains only a policy label and is not
+cryptographic remote-server identity.
 
-- remote capabilities require explicit `MCPToolBinding` entries;
-- an unbound discovered remote tool is not automatically registered or exposed;
-- duplicate remote discovery names fail closed;
-- the platform owns the local tool name and description;
-- discovered remote parameter schemas must exactly match the pinned local
-  parameter schema before the adapter is created;
-- the configured client `server_name` must match the trust-policy label;
-- remote discovery alone grants no `ToolExecutionAuthorization`;
-- remote execution integrated into the application remains subject to the
-  existing `ToolRegistry`, `ToolExecutionPolicy`,
-  `ToolExecutionAuthorization`, and `ToolExecutionService` boundaries;
-- the project-owned MCP service exposes only explicitly configured, enabled,
-  authorized tools that do not require approval;
-- an inbound MCP `request_id` is correlation data rather than platform
-  execution identity;
-- the project-owned service creates a separate internal call ID, rejects an
-  external/internal identity collision, and does not return the internal call
-  ID in its response;
-- the project-owned service delegates execution through
-  `ToolExecutionService` rather than invoking a provider directly;
-- remote MCP execution has no automatic retry loop in this foundation.
+Project-owned MCP exposure now has a concrete authenticated Streamable HTTP
+path. The following controls are implemented:
+
+- the official Python MCP SDK is pinned to `mcp==2.2.0`;
+- the tested server protocol revision is `2026-07-28`;
+- the concrete path uses Streamable HTTP, JSON responses, and stateless HTTP;
+- the FastAPI host owns the MCP `session_manager` lifecycle;
+- Bearer-token verification occurs through an injected SDK `TokenVerifier`;
+- SDK resource validation is enabled;
+- required transport scopes are configured through `AuthSettings`;
+- `/mcp` and protected-resource metadata are exposed through the MCP ASGI app;
+- MCP is disabled by default;
+- enabled MCP requires explicit authenticated adapter composition;
+- `MCPAccessPolicy` derives execution authority only from verified token scopes
+  through platform-owned scope-to-tool mappings;
+- arbitrary token claims do not become execution allowlists;
+- the transport layer never manufactures approval grants;
+- approval-required tools remain excluded from MCP export;
+- `tools/list` is filtered by the derived execution authorization and core tool
+  policy;
+- `tools/call` delegates through `OwnedMCPToolService`, which delegates through
+  `ToolExecutionService`;
+- external request IDs remain correlation data and do not replace the internal
+  platform execution ID;
+- nested/composite argument values are rejected at the scalar platform
+  contract boundary;
+- request-body size is bounded by runtime configuration;
+- non-local hostnames require explicit transport-security configuration;
+- production issuer and resource-server URLs must use HTTPS;
+- the configured resource-server URL must target `/mcp`;
+- protocol, authentication, scope filtering, claim-escalation rejection, and
+  controlled tool execution are covered by real ASGI HTTP integration tests.
+
+Authentication does not itself grant tool authority. A token can reach the MCP
+handler only after transport verification, but the set of executable tools is
+still derived by trusted platform policy. A client cannot gain a tool merely by
+adding a claim named `allowed_tool_names`, and it cannot self-assert approval
+evidence.
 
 Residual limitations are explicit:
 
-- `server_name` is a configured label, not authenticated or cryptographically
-  verified remote identity;
-- `MCPToolProviderAdapter`, like every `ToolProvider`, has an internal
-  `execute()` method, so architectural composition must continue to route
-  application execution through the controlled service rather than treating
-  a provider object itself as authorization;
-- there is no JSON-RPC, stdio, Streamable HTTP, or other concrete MCP wire
-  transport yet;
-- authentication and connection/session lifecycle are not implemented;
+- this repository does not ship a concrete production `TokenVerifier` or
+  identity-provider integration; deployment composition must inject one;
+- the application validates that production MCP URLs use HTTPS but does not
+  itself terminate TLS;
+- the implemented wire path is inbound server-side Streamable HTTP only;
+- the remote MCP client remains transport-neutral and has no concrete wire
+  transport in this feature;
+- stdio transport is not implemented;
 - MCP resources and prompts are not implemented;
-- transport-level timeout, response-size, rate-limit, and network-destination
-  controls are not yet implemented;
+- rate limiting and transport-level execution timeouts are not implemented;
+- there is no durable authenticated human-approval lifecycle;
+- approval-required tools therefore remain unavailable through MCP;
+- stateless HTTP is used and the tested modern path does not depend on
+  `Mcp-Session-Id`;
 - remote result content remains untrusted and may contain prompt injection,
   misleading content, or sensitive data;
-- the transport-neutral service accepts a platform
-  `ToolExecutionAuthorization` object from its trusted caller; a future remote
-  transport must derive that object from authenticated platform identity and
-  policy rather than accepting client-asserted permissions;
-- approval-required tools are excluded because authenticated durable HITL
-  approval is not yet available;
-- no shell, filesystem, or network tool is introduced by this foundation.
+- no shell, filesystem, or network tool is introduced by this feature.
 
-MCP wire transports therefore remain a future security boundary requiring
-authentication, identity binding, destination controls, bounded payloads,
-timeouts, rate limits, error normalization, and protocol-level adversarial
-testing before production exposure.
+Production deployment still requires deployment-specific token verification,
+TLS termination, host/origin policy, rate controls, monitoring, and operational
+response procedures appropriate to the deployment environment.
 
 ### Data Exfiltration
 
@@ -861,17 +878,13 @@ The current retrieval foundation does not yet implement:
 - approximate-nearest-neighbor indexes;
 - adversarial retrieval evaluations;
 - durable/distributed conversational agent runtime;
-- concrete MCP wire transport, authentication, resources, and prompts;
+- outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, and transport rate controls;
 - workflow runtime.
 
 Bounded caller-supplied text ingestion, retrieval, provider-neutral
 reranking, grounded generation, and end-to-end RAG orchestration are active
 application surfaces rather than purely anticipatory surfaces.
-Filesystem/network source acquisition, richer document parsing, public
-retrieval exposure, tenant authorization, durable/distributed agent runtime,
-concrete MCP wire transports, workflows, and AI observability remain
-partially or wholly anticipatory and require additional executable controls
-when introduced.
+Filesystem/network source acquisition, richer document parsing, public retrieval exposure, tenant authorization, durable/distributed agent runtime, outbound remote MCP wire transport, MCP stdio/resources/prompts, production identity-provider integration, workflows, and AI observability remain partially or wholly anticipatory and require additional executable controls when introduced.
 
 Each future feature must update this threat model when it materially
 changes:

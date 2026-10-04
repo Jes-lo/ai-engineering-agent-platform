@@ -200,53 +200,67 @@ multi-turn conversational agent loop. It still does not implement filesystem or
 network source loaders, PDF/DOCX/HTML parsing, document replacement/reindex
 lifecycle orchestration, a public retrieval API, a concrete reranker adapter,
 tenant-aware retrieval authorization, presentation-layer citation rendering,
-semantic groundedness evaluation, concrete MCP wire transports, MCP authentication/resources/prompts, workflow execution,
+semantic groundedness evaluation, outbound remote MCP wire transport, MCP stdio/resources/prompts, production identity-provider integration, workflow execution,
 authenticated durable HITL state, or AI observability backends.
 
 ## MCP Interoperability Foundation
 
-The repository now includes a project-owned, transport-neutral MCP
-interoperability foundation.
+The repository now has both a transport-neutral MCP core and an authenticated
+server-side Streamable HTTP adapter.
 
-For consuming remote MCP capabilities, `MCPClient` defines the transport
-adapter boundary while `MCPTrustPolicy` and `MCPToolBinding` require explicit
-remote-to-local capability bindings. Remote discovery is untrusted input:
-discovering a tool does not register, authorize, or expose it automatically.
-The platform retains the local `ToolDefinition`, including the model-visible
-name and description, and the discovered remote parameter schema must match
-the pinned local parameter schema before the adapter is created.
+Remote MCP consumption remains transport-neutral. `MCPClient`,
+`MCPTrustPolicy`, and explicit `MCPToolBinding` values keep discovery
+non-authoritative: discovered remote tools do not automatically become
+registered, trusted, authorized, or model-visible. Platform-owned local
+`ToolDefinition` values continue to own the local name, description, and
+parameter schema.
 
-`MCPToolProviderAdapter` then presents those explicitly bound capabilities
-through the existing `ToolProvider` contract. The adapter itself is not an
-authorization system; application composition must continue to place it behind
-`ToolRegistry`, explicit `ToolExecutionPolicy`, per-execution
-`ToolExecutionAuthorization`, and `ToolExecutionService`. As with other
-`ToolProvider` implementations, direct provider calls are an internal
-programming surface and are not a substitute for the controlled execution
-boundary.
+For project-owned tool exposure, `OwnedMCPToolService` remains the execution
+control boundary beneath the wire adapter. It exposes only explicitly selected,
+enabled, authorized tools that do not require approval and delegates execution
+through `ToolExecutionService`. External MCP request IDs remain correlation
+data rather than platform execution identities.
 
-For exposing project-owned tools, `OwnedMCPToolService` lists only explicitly
-exported, enabled, authorized tools that do not require approval. Inbound
-requests receive an internal platform execution `call_id` created by the
-service; the default factory uses a UUID4-backed identifier. The external
-MCP `request_id` is correlation data only, cannot equal the internal
-execution identity, and the internal ID is not returned in
-`MCPToolCallResponse`. Execution is delegated to `ToolExecutionService`
-rather than directly to a tool provider.
+Feature 16 adds a concrete inbound MCP server path using the official Python
+MCP SDK pinned as `mcp==2.2.0`. The implemented and tested protocol path uses
+MCP revision `2026-07-28`, Streamable HTTP, JSON responses, and stateless HTTP.
+The FastAPI host mounts the MCP ASGI application while owning the SDK
+`session_manager` lifecycle. The server publishes `/mcp` and the protected
+resource metadata route required by the SDK.
 
-This foundation does **not** yet implement an MCP wire protocol or claim
-protocol interoperability with external MCP products. JSON-RPC mapping,
-stdio transport, Streamable HTTP, authentication, connection/session
-lifecycle, resources, prompts, transport timeouts, response-size limits,
-rate limits, and network-destination policy remain future work. The configured
-`server_name` is a local trust-policy label, not cryptographic proof of remote
-server identity.
+Bearer-token verification is supplied through an injected `TokenVerifier`.
+The SDK resource-server middleware is configured with resource validation and
+required transport scopes. After token verification, `MCPAccessPolicy` derives
+local `ToolExecutionAuthorization` only from platform-owned mappings of verified
+token scopes to tool names. Arbitrary token claims such as an
+`allowed_tool_names` claim do not grant capabilities, and the wire layer never
+constructs approval grants.
 
-A future authenticated transport must derive
-`ToolExecutionAuthorization` from trusted platform identity and policy. Remote
-clients must never be allowed to self-assert their own execution allowlist or
-approval evidence. Approval-required tools remain intentionally excluded until
-an authenticated, durable human-approval lifecycle exists.
+The concrete HTTP path currently supports and tests `tools/list` and
+`tools/call`. Approval-required tools remain excluded. Scalar tool arguments
+remain fail-closed and are not silently coerced into platform values.
+
+MCP is disabled by default. Runtime configuration includes:
+
+- `AI_PLATFORM_MCP_ENABLED`;
+- `AI_PLATFORM_MCP_HOST`;
+- `AI_PLATFORM_MCP_ISSUER_URL`;
+- `AI_PLATFORM_MCP_RESOURCE_SERVER_URL`;
+- `AI_PLATFORM_MCP_REQUIRED_SCOPES`;
+- `AI_PLATFORM_MCP_MAX_REQUEST_BODY_SIZE`.
+
+When MCP is enabled, issuer and resource URLs are required, the resource URL
+must target `/mcp`, and production issuer/resource URLs must use HTTPS.
+Non-local MCP hostnames require explicit transport-security configuration
+instead of silently accepting unrestricted Host/Origin values.
+
+This feature does not ship a concrete production identity-provider integration
+or a production `TokenVerifier`; deployments must inject one. It also does not
+add stdio transport, an outbound remote MCP wire client, MCP resources or
+prompts, durable authenticated HITL approval, transport rate limiting,
+transport execution timeouts, or shell/filesystem/network tools. TLS
+termination is not implemented by the application itself. Remote MCP results
+and protocol input remain untrusted data.
 
 ## Planned Capabilities
 
@@ -266,7 +280,7 @@ including:
 - durable/distributed conversational-agent execution and continuation recovery;
 - cross-process agent state, durable replay protection, and resumable
   continuation recovery;
-- concrete MCP wire transports (JSON-RPC/stdio/Streamable HTTP), authenticated connection lifecycle, resources, and prompts;
+- outbound remote MCP wire-client support, stdio transport, MCP resources/prompts, and production identity-provider integration;
 - workflow automation;
 - human-in-the-loop approval;
 - guardrails;
