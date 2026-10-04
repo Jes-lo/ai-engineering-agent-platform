@@ -176,3 +176,15 @@ These tools and actions remain subject to their respective upstream
 licenses, terms, copyrights, and ownership.
 
 Repository licensing does not apply to these third-party components.
+
+## Model Context Protocol Python SDK
+
+Feature 16 uses the third-party Model Context Protocol Python SDK packages:
+
+- `mcp` 2.2.0 — MIT License;
+- `mcp-types` 2.2.0 — MIT License.
+
+These packages provide MCP protocol types, server transport, and authentication
+middleware used by the adapter layer. They remain third-party software subject
+to their own license terms. Their inclusion does not imply endorsement,
+sponsorship, or affiliation with this repository.
