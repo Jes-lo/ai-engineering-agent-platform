@@ -156,8 +156,9 @@ The current loop is intentionally not durable or distributed. Pending
 continuations remain in memory and are lost on process restart. Tool batches
 remain sequential and non-transactional, with no rollback of earlier side
 effects and no automatic retry after execution begins. Authenticated HITL
-lifecycle, MCP, workflows, n8n, shell tools, filesystem tools, and network
-tools remain outside this feature.
+lifecycle, MCP wire transports and authenticated connection lifecycle,
+workflows, n8n, shell tools, filesystem tools, and network tools remain
+outside the bounded-agent feature.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
@@ -199,8 +200,53 @@ multi-turn conversational agent loop. It still does not implement filesystem or
 network source loaders, PDF/DOCX/HTML parsing, document replacement/reindex
 lifecycle orchestration, a public retrieval API, a concrete reranker adapter,
 tenant-aware retrieval authorization, presentation-layer citation rendering,
-semantic groundedness evaluation, MCP integrations, workflow execution,
+semantic groundedness evaluation, concrete MCP wire transports, MCP authentication/resources/prompts, workflow execution,
 authenticated durable HITL state, or AI observability backends.
+
+## MCP Interoperability Foundation
+
+The repository now includes a project-owned, transport-neutral MCP
+interoperability foundation.
+
+For consuming remote MCP capabilities, `MCPClient` defines the transport
+adapter boundary while `MCPTrustPolicy` and `MCPToolBinding` require explicit
+remote-to-local capability bindings. Remote discovery is untrusted input:
+discovering a tool does not register, authorize, or expose it automatically.
+The platform retains the local `ToolDefinition`, including the model-visible
+name and description, and the discovered remote parameter schema must match
+the pinned local parameter schema before the adapter is created.
+
+`MCPToolProviderAdapter` then presents those explicitly bound capabilities
+through the existing `ToolProvider` contract. The adapter itself is not an
+authorization system; application composition must continue to place it behind
+`ToolRegistry`, explicit `ToolExecutionPolicy`, per-execution
+`ToolExecutionAuthorization`, and `ToolExecutionService`. As with other
+`ToolProvider` implementations, direct provider calls are an internal
+programming surface and are not a substitute for the controlled execution
+boundary.
+
+For exposing project-owned tools, `OwnedMCPToolService` lists only explicitly
+exported, enabled, authorized tools that do not require approval. Inbound
+requests receive an internal platform execution `call_id` created by the
+service; the default factory uses a UUID4-backed identifier. The external
+MCP `request_id` is correlation data only, cannot equal the internal
+execution identity, and the internal ID is not returned in
+`MCPToolCallResponse`. Execution is delegated to `ToolExecutionService`
+rather than directly to a tool provider.
+
+This foundation does **not** yet implement an MCP wire protocol or claim
+protocol interoperability with external MCP products. JSON-RPC mapping,
+stdio transport, Streamable HTTP, authentication, connection/session
+lifecycle, resources, prompts, transport timeouts, response-size limits,
+rate limits, and network-destination policy remain future work. The configured
+`server_name` is a local trust-policy label, not cryptographic proof of remote
+server identity.
+
+A future authenticated transport must derive
+`ToolExecutionAuthorization` from trusted platform identity and policy. Remote
+clients must never be allowed to self-assert their own execution allowlist or
+approval evidence. Approval-required tools remain intentionally excluded until
+an authenticated, durable human-approval lifecycle exists.
 
 ## Planned Capabilities
 
@@ -220,7 +266,7 @@ including:
 - durable/distributed conversational-agent execution and continuation recovery;
 - cross-process agent state, durable replay protection, and resumable
   continuation recovery;
-- MCP integrations and a project-owned MCP server;
+- concrete MCP wire transports (JSON-RPC/stdio/Streamable HTTP), authenticated connection lifecycle, resources, and prompts;
 - workflow automation;
 - human-in-the-loop approval;
 - guardrails;

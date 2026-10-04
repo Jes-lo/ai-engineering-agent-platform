@@ -100,8 +100,8 @@ after execution starts remain intentionally absent.
 
 Future hardening includes durable/distributed continuation state, authenticated
 human-approval lifecycle controls, elapsed-time/rate budgets, and stronger
-audit/observability support. MCP and workflow capabilities must preserve these
-same authority boundaries when introduced.
+audit/observability support. Concrete MCP wire transports and workflow
+capabilities must preserve these same authority boundaries when introduced.
 
 ## 7. Minimize Sensitive Context
 
@@ -124,6 +124,23 @@ boundaries.
 
 Connecting a service does not automatically authorize it to receive
 all platform data.
+
+The transport-neutral MCP foundation applies the same rule to external
+capabilities. Remote discovery is data, not authority. Only explicitly bound
+remote tools can enter the platform-owned tool surface, and remote descriptions
+do not replace platform-controlled descriptions.
+
+Project-owned MCP exposure is also capability-limited: tools must be explicitly
+exported, enabled, and authorized, while approval-required tools remain
+excluded. External request identifiers do not become platform execution
+identities.
+
+The current `server_name` binding is not authenticated identity. Any future MCP
+wire transport must authenticate its peer and derive execution authorization
+from trusted platform identity and policy. A remote client must never be
+allowed to self-assert an allowlist or approval grant merely through protocol
+input. Remote MCP results remain untrusted context and must not override system
+policy or grant later tool authority.
 
 ## 9. Evaluate AI Behavior
 
