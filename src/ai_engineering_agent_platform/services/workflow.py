@@ -22,6 +22,10 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowStepState,
     WorkflowStepStatus,
 )
+from ai_engineering_agent_platform.services.workflow_persistence import (
+    WorkflowCheckpoint,
+    WorkflowStateStore,
+)
 
 MAX_WORKFLOW_EXECUTION_STEPS = MAX_WORKFLOW_DEFINITION_STEPS
 
@@ -40,6 +44,10 @@ class WorkflowExecutionLimitError(WorkflowControlError):
 
 class WorkflowInputError(WorkflowControlError):
     """Raised before execution when typed workflow inputs are invalid."""
+
+
+class WorkflowResumeError(WorkflowControlError):
+    """Raised when durable workflow continuation cannot proceed safely."""
 
 
 class WorkflowStepExecutionError(WorkflowControlError):
@@ -360,6 +368,7 @@ class WorkflowEngine:
             str,
         ]
         | None = None,
+        state_store: WorkflowStateStore | None = None,
     ) -> None:
         """Create one bounded workflow engine."""
         if not isinstance(
@@ -389,6 +398,131 @@ class WorkflowEngine:
         self._run_id_factory = (
             _default_run_id if run_id_factory is None else run_id_factory
         )
+        self._state_store = state_store
+
+    @staticmethod
+    def _running_state(
+        *,
+        run_id: str,
+        definition: WorkflowDefinition,
+        inputs: tuple[
+            WorkflowInput,
+            ...,
+        ],
+        steps: tuple[
+            WorkflowStepState,
+            ...,
+        ],
+    ) -> WorkflowRunState:
+        """Build one validated non-terminal workflow snapshot."""
+        return WorkflowRunState(
+            run_id=run_id,
+            workflow_id=definition.workflow_id,
+            workflow_version=definition.version,
+            status=WorkflowRunStatus.RUNNING,
+            inputs=inputs,
+            steps=steps,
+        )
+
+    async def _save_checkpoint(
+        self,
+        *,
+        state: WorkflowRunState,
+        events: list[WorkflowExecutionEvent,],
+    ) -> None:
+        """Persist progress when a durable state store is configured."""
+        if self._state_store is None:
+            return
+
+        await self._state_store.save(
+            WorkflowCheckpoint(
+                state=state,
+                events=tuple(events),
+            )
+        )
+
+    @staticmethod
+    def _validate_resume_checkpoint(
+        *,
+        definition: WorkflowDefinition,
+        validated_inputs: tuple[
+            WorkflowInput,
+            ...,
+        ],
+        checkpoint: WorkflowCheckpoint,
+        run_id: str,
+    ) -> None:
+        """Fail closed unless saved progress exactly matches this definition."""
+        state = checkpoint.state
+
+        if (
+            state.run_id != run_id
+            or state.workflow_id != definition.workflow_id
+            or state.workflow_version != definition.version
+        ):
+            raise WorkflowResumeError("workflow checkpoint identity mismatch")
+
+        if state.status is not WorkflowRunStatus.RUNNING:
+            raise WorkflowResumeError("workflow checkpoint is not resumable")
+
+        if state.inputs != validated_inputs:
+            raise WorkflowResumeError(
+                "workflow checkpoint inputs differ from supplied inputs"
+            )
+
+        if len(state.steps) > len(definition.steps):
+            raise WorkflowResumeError("workflow checkpoint progress exceeds definition")
+
+        if len(checkpoint.events) != len(state.steps) + 1:
+            raise WorkflowResumeError(
+                "workflow checkpoint event ledger is incompatible"
+            )
+
+        for index, saved_step in enumerate(state.steps):
+            definition_step = definition.steps[index]
+
+            if (
+                saved_step.step_id != definition_step.step_id
+                or saved_step.executor_name != definition_step.executor_name
+            ):
+                raise WorkflowResumeError(
+                    "workflow checkpoint progress is incompatible"
+                )
+
+            condition = definition_step.condition
+
+            should_skip = condition is not None and not _condition_matches(
+                condition,
+                validated_inputs,
+            )
+
+            expected_status = (
+                WorkflowStepStatus.SKIPPED
+                if should_skip
+                else WorkflowStepStatus.COMPLETED
+            )
+
+            if saved_step.status is not expected_status:
+                raise WorkflowResumeError(
+                    "workflow checkpoint step status is incompatible"
+                )
+
+            expected_event_type = (
+                WorkflowEventType.STEP_SKIPPED
+                if expected_status is WorkflowStepStatus.SKIPPED
+                else WorkflowEventType.STEP_COMPLETED
+            )
+
+            event = checkpoint.events[index + 1]
+
+            if (
+                event.event_type is not expected_event_type
+                or event.step_id != saved_step.step_id
+                or event.executor_name != saved_step.executor_name
+            ):
+                raise WorkflowResumeError(
+                    "workflow checkpoint event ledger is incompatible"
+                )
 
     async def run(
         self,
@@ -467,6 +601,16 @@ class WorkflowEngine:
 
         skipped_step_ids: set[str] = set()
 
+        await self._save_checkpoint(
+            state=self._running_state(
+                run_id=run_id,
+                definition=definition,
+                inputs=validated_inputs,
+                steps=(),
+            ),
+            events=events,
+        )
+
         for (
             step,
             executor,
@@ -490,6 +634,16 @@ class WorkflowEngine:
                 record_event(
                     WorkflowEventType.STEP_SKIPPED,
                     step=step,
+                )
+
+                await self._save_checkpoint(
+                    state=self._running_state(
+                        run_id=run_id,
+                        definition=definition,
+                        inputs=validated_inputs,
+                        steps=tuple(step_states),
+                    ),
+                    events=events,
                 )
 
                 continue
@@ -552,6 +706,11 @@ class WorkflowEngine:
                     ),
                 )
 
+                await self._save_checkpoint(
+                    state=failed_state,
+                    events=events,
+                )
+
                 raise WorkflowStepExecutionError(
                     step_id=step.step_id,
                     executor_name=step.executor_name,
@@ -583,6 +742,16 @@ class WorkflowEngine:
                 )
             )
 
+            await self._save_checkpoint(
+                state=self._running_state(
+                    run_id=run_id,
+                    definition=definition,
+                    inputs=validated_inputs,
+                    steps=tuple(step_states),
+                ),
+                events=events,
+            )
+
         record_event(WorkflowEventType.RUN_COMPLETED)
 
         completed_trace = WorkflowExecutionTrace(
@@ -599,6 +768,280 @@ class WorkflowEngine:
             status=WorkflowRunStatus.COMPLETED,
             inputs=validated_inputs,
             steps=tuple(step_states),
+        )
+
+        await self._save_checkpoint(
+            state=completed_state,
+            events=events,
+        )
+
+        return WorkflowRunResult(
+            run_id=run_id,
+            workflow_id=definition.workflow_id,
+            workflow_version=definition.version,
+            executions=tuple(executions),
+            state=completed_state,
+            trace=completed_trace,
+        )
+
+    async def resume(
+        self,
+        definition: WorkflowDefinition,
+        *,
+        run_id: str,
+        inputs: tuple[
+            WorkflowInput,
+            ...,
+        ] = (),
+    ) -> WorkflowRunResult:
+        """Explicitly continue one validated non-terminal durable checkpoint."""
+        if self._state_store is None:
+            raise WorkflowResumeError("workflow resume requires durable state store")
+
+        if not isinstance(
+            definition,
+            WorkflowDefinition,
+        ):
+            raise WorkflowControlError("definition must be a WorkflowDefinition")
+
+        if len(definition.steps) > self._max_steps:
+            raise WorkflowExecutionLimitError(
+                "workflow exceeds configured execution step budget"
+            )
+
+        resolved = tuple(
+            (
+                step,
+                self._registry.executor(step.executor_name),
+            )
+            for step in definition.steps
+        )
+
+        validated_inputs = _validate_inputs(
+            definition,
+            inputs,
+        )
+
+        if (
+            not isinstance(
+                run_id,
+                str,
+            )
+            or not run_id.strip()
+        ):
+            raise WorkflowResumeError("run_id must be a non-empty string")
+
+        checkpoint = await self._state_store.load(run_id)
+
+        if checkpoint is None:
+            raise WorkflowResumeError("workflow checkpoint not found")
+
+        if not isinstance(
+            checkpoint,
+            WorkflowCheckpoint,
+        ):
+            raise WorkflowResumeError(
+                "workflow state store returned invalid checkpoint"
+            )
+
+        self._validate_resume_checkpoint(
+            definition=definition,
+            validated_inputs=validated_inputs,
+            checkpoint=checkpoint,
+            run_id=run_id,
+        )
+
+        events = list(checkpoint.events)
+
+        step_states = list(checkpoint.state.steps)
+
+        executions = list(checkpoint.state.executions)
+
+        by_step_id = {execution.step_id: execution for execution in executions}
+
+        skipped_step_ids = set(checkpoint.state.skipped_step_ids)
+
+        def record_event(
+            event_type: WorkflowEventType,
+            *,
+            step: WorkflowStepDefinition | None = None,
+        ) -> None:
+            events.append(
+                WorkflowExecutionEvent(
+                    sequence=len(events) + 1,
+                    run_id=run_id,
+                    workflow_id=definition.workflow_id,
+                    workflow_version=definition.version,
+                    event_type=event_type,
+                    step_id=(None if step is None else step.step_id),
+                    executor_name=(None if step is None else step.executor_name),
+                )
+            )
+
+        remaining = resolved[len(step_states) :]
+
+        for (
+            step,
+            executor,
+        ) in remaining:
+            condition = step.condition
+
+            if condition is not None and not _condition_matches(
+                condition,
+                validated_inputs,
+            ):
+                step_states.append(
+                    WorkflowStepState(
+                        step_id=step.step_id,
+                        executor_name=step.executor_name,
+                        status=WorkflowStepStatus.SKIPPED,
+                    )
+                )
+
+                skipped_step_ids.add(step.step_id)
+
+                record_event(
+                    WorkflowEventType.STEP_SKIPPED,
+                    step=step,
+                )
+
+                await self._save_checkpoint(
+                    state=self._running_state(
+                        run_id=run_id,
+                        definition=definition,
+                        inputs=validated_inputs,
+                        steps=tuple(step_states),
+                    ),
+                    events=events,
+                )
+
+                continue
+
+            dependency_results = tuple(
+                by_step_id[dependency]
+                for dependency in step.depends_on
+                if dependency in by_step_id
+            )
+
+            skipped_dependency_ids = tuple(
+                dependency
+                for dependency in step.depends_on
+                if dependency in skipped_step_ids
+            )
+
+            context = WorkflowStepContext(
+                run_id=run_id,
+                workflow_id=definition.workflow_id,
+                workflow_version=definition.version,
+                step_id=step.step_id,
+                dependency_results=dependency_results,
+                inputs=validated_inputs,
+                skipped_dependency_ids=skipped_dependency_ids,
+            )
+
+            try:
+                output = await executor.execute(
+                    step=step,
+                    context=context,
+                )
+            except Exception as exc:
+                record_event(
+                    WorkflowEventType.STEP_FAILED,
+                    step=step,
+                )
+
+                record_event(WorkflowEventType.RUN_FAILED)
+
+                failed_trace = WorkflowExecutionTrace(
+                    run_id=run_id,
+                    workflow_id=definition.workflow_id,
+                    workflow_version=definition.version,
+                    events=tuple(events),
+                )
+
+                failed_state = WorkflowRunState(
+                    run_id=run_id,
+                    workflow_id=definition.workflow_id,
+                    workflow_version=definition.version,
+                    status=WorkflowRunStatus.FAILED,
+                    inputs=validated_inputs,
+                    steps=(
+                        *step_states,
+                        WorkflowStepState(
+                            step_id=step.step_id,
+                            executor_name=step.executor_name,
+                            status=WorkflowStepStatus.FAILED,
+                        ),
+                    ),
+                )
+
+                await self._save_checkpoint(
+                    state=failed_state,
+                    events=events,
+                )
+
+                raise WorkflowStepExecutionError(
+                    step_id=step.step_id,
+                    executor_name=step.executor_name,
+                    state=failed_state,
+                    trace=failed_trace,
+                ) from exc
+
+            execution = WorkflowStepExecution(
+                step_id=step.step_id,
+                executor_name=step.executor_name,
+                output=output,
+            )
+
+            executions.append(execution)
+
+            by_step_id[step.step_id] = execution
+
+            record_event(
+                WorkflowEventType.STEP_COMPLETED,
+                step=step,
+            )
+
+            step_states.append(
+                WorkflowStepState(
+                    step_id=step.step_id,
+                    executor_name=step.executor_name,
+                    status=WorkflowStepStatus.COMPLETED,
+                    execution=execution,
+                )
+            )
+
+            await self._save_checkpoint(
+                state=self._running_state(
+                    run_id=run_id,
+                    definition=definition,
+                    inputs=validated_inputs,
+                    steps=tuple(step_states),
+                ),
+                events=events,
+            )
+
+        record_event(WorkflowEventType.RUN_COMPLETED)
+
+        completed_trace = WorkflowExecutionTrace(
+            run_id=run_id,
+            workflow_id=definition.workflow_id,
+            workflow_version=definition.version,
+            events=tuple(events),
+        )
+
+        completed_state = WorkflowRunState(
+            run_id=run_id,
+            workflow_id=definition.workflow_id,
+            workflow_version=definition.version,
+            status=WorkflowRunStatus.COMPLETED,
+            inputs=validated_inputs,
+            steps=tuple(step_states),
+        )
+
+        await self._save_checkpoint(
+            state=completed_state,
+            events=events,
         )
 
         return WorkflowRunResult(

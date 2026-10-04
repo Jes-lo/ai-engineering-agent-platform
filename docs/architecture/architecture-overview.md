@@ -541,7 +541,7 @@ without calling the provider. `ControlledAgentService` composes that boundary
 with untrusted `LLMToolCall` proposals, and `BoundedAgentLoopService` composes
 multiple controlled turns plus validated tool-result history without granting
 the model new execution authority. Durable/distributed agent state,
-authenticated HITL approval, outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, workflow execution, external workflow-engine integration, shell tools, filesystem tools, and network tools remain future capabilities.
+authenticated HITL approval, outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, external workflow-engine integration, shell tools, filesystem tools, and network tools remain future capabilities.
 
 ### MCP
 
@@ -614,8 +614,7 @@ automatically resumed.
 
 Inputs are exact typed scalars and conditions support typed equality/inequality
 only. There is no arbitrary expression, template, generated-code, or shell
-evaluation. Automatic retry, rollback, parallel execution, durable persistence,
-durable resume, and durable HITL are not implemented.
+evaluation. Automatic retry, rollback, parallel execution, and durable authenticated HITL are not implemented. Durable workflow checkpoint persistence and explicit resume are implemented behind the application-owned `WorkflowStateStore` boundary. Resume is caller-initiated, accepts only validated `RUNNING` checkpoints, and does not claim exactly-once executor side effects.
 
 Structural events are `RUN_STARTED`, `STEP_COMPLETED`, `STEP_SKIPPED`,
 `STEP_FAILED`, `RUN_COMPLETED`, and `RUN_FAILED`. They exclude input values,
