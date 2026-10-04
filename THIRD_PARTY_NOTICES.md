@@ -188,3 +188,10 @@ These packages provide MCP protocol types, server transport, and authentication
 middleware used by the adapter layer. They remain third-party software subject
 to their own license terms. Their inclusion does not imply endorsement,
 sponsorship, or affiliation with this repository.
+
+## OpenTelemetry API
+
+Feature 17 directly depends on `opentelemetry-api` 1.45.0 under the Apache
+License 2.0. It is used for an injected terminal workflow trace projection.
+Feature 17 does not configure the OpenTelemetry SDK, OTLP exporters, a
+Collector, or a telemetry backend.
