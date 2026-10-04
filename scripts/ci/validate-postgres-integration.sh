@@ -243,6 +243,7 @@ AI_PLATFORM_POSTGRES_INTEGRATION_RUNTIME_ENV="$RUNTIME_ENV" \
 uv run pytest \
   -W error \
   tests/integration/test_postgres_vector_live.py \
+  tests/integration/test_postgres_workflow_persistence_live.py \
   -v
 
 echo "PASS: live provider integration"
@@ -322,7 +323,7 @@ SQL
 
 echo "role|vector086|tables|collections|records|revision=$FINAL_STATE"
 
-[[ "$FINAL_STATE" == "1|1|2|0|0|$EXPECTED_REVISION" ]] || {
+[[ "$FINAL_STATE" == "1|1|3|0|0|$EXPECTED_REVISION" ]] || {
   echo "FAIL: integration database final state is unexpected"
   exit 1
 }

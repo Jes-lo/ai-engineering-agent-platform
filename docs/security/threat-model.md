@@ -924,8 +924,7 @@ equality/inequality only; and the engine has one executor call site.
 
 Workflow adapters reuse existing Tool, RAG, and bounded Agent services.
 Approval-required execution remains fail-closed. Automatic agent resume,
-automatic retry, rollback/compensation, parallel execution, durable persistence,
-durable resume, and durable HITL are not implemented.
+automatic retry, rollback/compensation, parallel execution, and durable authenticated HITL are not implemented. Durable workflow checkpoints and explicit `RUNNING`-state resume are implemented behind `WorkflowStateStore`; checkpoint identity, inputs, progress, and structural events are validated fail-closed before resumed executor side effects. Resume does not guarantee exactly-once executor side effects across process loss.
 
 A failed workflow can leave earlier side effects and must not be interpreted as
 transactional rollback.
