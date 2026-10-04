@@ -118,8 +118,9 @@ boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
 endpoint, streaming model generation, concrete reranker adapter,
-durable/distributed conversational-agent runtime, MCP integration, workflow
-runtime, or AI observability backend.
+durable/distributed conversational-agent runtime, concrete MCP wire transport,
+authenticated MCP connection lifecycle, workflow runtime, or AI observability
+backend.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
 semantic retrieval, provider-neutral optional reranking, deterministic context
@@ -542,20 +543,61 @@ without calling the provider. `ControlledAgentService` composes that boundary
 with untrusted `LLMToolCall` proposals, and `BoundedAgentLoopService` composes
 multiple controlled turns plus validated tool-result history without granting
 the model new execution authority. Durable/distributed agent state,
-authenticated HITL approval, MCP discovery, workflow execution, n8n
-integration, shell tools, filesystem tools, and network tools remain future
-capabilities.
+authenticated HITL approval, concrete MCP wire transports and authenticated
+MCP connection lifecycle, workflow execution, n8n integration, shell tools,
+filesystem tools, and network tools remain future capabilities.
 
 ### MCP
 
-The project is expected to both consume MCP capabilities and implement a
-project-owned MCP service.
+The project now has a transport-neutral MCP interoperability core in both
+directions, without yet claiming wire-protocol compatibility.
 
-MCP-related behavior must remain behind explicit trust and authorization
-boundaries.
+For remote MCP consumption, `MCPClient` is the transport adapter contract.
+`MCPTrustPolicy` contains explicit `MCPToolBinding` values that map a configured
+remote tool name to a platform-owned local `ToolDefinition`. Discovery is
+treated as untrusted metadata and does not itself create authorization.
 
-External MCP servers must not automatically inherit access to platform
-secrets, internal networks, user data, or privileged tools.
+`MCPToolProviderAdapter.discover()` fails closed when:
+
+- the configured client `server_name` differs from the trust-policy label;
+- a policy-bound remote tool is absent;
+- discovery contains duplicate remote tool names;
+- a discovered parameter schema differs from the pinned platform schema.
+
+Unbound remotely discovered tools are ignored rather than automatically
+registered. Remote descriptions are not adopted into the platform-owned tool
+definition. The `server_name` comparison is configuration binding only; it is
+not authenticated or cryptographic server identity.
+
+After discovery, the adapter implements the normal `ToolProvider` contract.
+It deliberately makes no authorization decision. Correct platform composition
+registers it with `ToolRegistry` and executes it through the existing
+`ToolExecutionService` boundary. The provider method remains an internal
+adapter surface just like other `ToolProvider` implementations and must not be
+treated as authorization authority.
+
+For project-owned MCP exposure, `OwnedMCPToolService` is a transport-neutral
+service core. Its exposure list is explicit. The explicit exposure set is
+further filtered by enabled platform policy, the supplied execution
+authorization, and the current prohibition on approval-required tools.
+
+Inbound `MCPToolCallRequest.request_id` is external correlation data. The
+service creates a separate internal `ToolInvocation.call_id`, rejects an
+identity collision, delegates execution to `ToolExecutionService`, and returns
+only the external request correlation plus normalized tool result fields.
+Internal execution identity is not part of `MCPToolCallResponse`.
+
+The current MCP core has no JSON-RPC codec, stdio process transport, Streamable
+HTTP transport, authentication, connection/session lifecycle, resources,
+prompts, retry loop, shell/filesystem/network tools, or transport-level
+timeout/response-size/rate controls. Those belong to later adapter/runtime
+features.
+
+A future authenticated MCP transport must convert authenticated principal and
+platform policy into `ToolExecutionAuthorization`; execution allowlists and
+approval evidence must never be trusted merely because a remote client supplied
+them. Approval-required tool export also remains blocked until the platform has
+an authenticated and durable HITL lifecycle.
 
 ### Workflows and Automation
 

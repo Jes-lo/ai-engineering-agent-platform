@@ -59,6 +59,16 @@ from ai_engineering_agent_platform.services.ingestion_mapping import (
     normalize_knowledge_media_type,
     parse_knowledge_source,
 )
+from ai_engineering_agent_platform.services.mcp import (
+    MCPControlError,
+    MCPDiscoveryError,
+    MCPRemoteExecutionError,
+    MCPServerPolicyError,
+    MCPToolProviderAdapter,
+    MCPTrustPolicy,
+    MCPTrustPolicyError,
+    OwnedMCPToolService,
+)
 from ai_engineering_agent_platform.services.rag import (
     RAGResult,
     RAGService,
@@ -123,6 +133,14 @@ __all__ = [
     "IndexingService",
     "KnowledgeIngestionResult",
     "KnowledgeIngestionService",
+    "MCPControlError",
+    "MCPDiscoveryError",
+    "MCPRemoteExecutionError",
+    "MCPServerPolicyError",
+    "MCPToolProviderAdapter",
+    "MCPTrustPolicy",
+    "MCPTrustPolicyError",
+    "OwnedMCPToolService",
     "RAGEvaluationCaseExecution",
     "RAGEvaluationRunResult",
     "RAGEvaluationService",

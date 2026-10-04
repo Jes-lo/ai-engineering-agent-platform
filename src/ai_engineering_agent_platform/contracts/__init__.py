@@ -19,6 +19,13 @@ from ai_engineering_agent_platform.contracts.llm import (
     MessageRole,
     TokenUsage,
 )
+from ai_engineering_agent_platform.contracts.mcp import (
+    MCPClient,
+    MCPRemoteToolResult,
+    MCPToolBinding,
+    MCPToolCallRequest,
+    MCPToolCallResponse,
+)
 from ai_engineering_agent_platform.contracts.provider import (
     Provider,
     ProviderDescriptor,
@@ -66,6 +73,11 @@ __all__ = [
     "LLMResponse",
     "LLMToolCall",
     "LLMToolResultMessage",
+    "MCPClient",
+    "MCPRemoteToolResult",
+    "MCPToolBinding",
+    "MCPToolCallRequest",
+    "MCPToolCallResponse",
     "MessageRole",
     "Provider",
     "ProviderDescriptor",

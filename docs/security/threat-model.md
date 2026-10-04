@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.3
+Version: 1.4
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -344,11 +344,62 @@ Residual limitations remain explicit:
 
 ### MCP Trust Failure
 
-External MCP capabilities may provide malicious or misleading metadata,
-tools, resources, or outputs.
+External MCP discovery, metadata, tool results, and future protocol messages are
+untrusted input. Connecting or configuring an MCP server must not implicitly
+authorize every capability it exposes.
 
-Connecting to an MCP server must not implicitly authorize every
-capability it exposes.
+The current transport-neutral foundation applies these controls:
+
+- remote capabilities require explicit `MCPToolBinding` entries;
+- an unbound discovered remote tool is not automatically registered or exposed;
+- duplicate remote discovery names fail closed;
+- the platform owns the local tool name and description;
+- discovered remote parameter schemas must exactly match the pinned local
+  parameter schema before the adapter is created;
+- the configured client `server_name` must match the trust-policy label;
+- remote discovery alone grants no `ToolExecutionAuthorization`;
+- remote execution integrated into the application remains subject to the
+  existing `ToolRegistry`, `ToolExecutionPolicy`,
+  `ToolExecutionAuthorization`, and `ToolExecutionService` boundaries;
+- the project-owned MCP service exposes only explicitly configured, enabled,
+  authorized tools that do not require approval;
+- an inbound MCP `request_id` is correlation data rather than platform
+  execution identity;
+- the project-owned service creates a separate internal call ID, rejects an
+  external/internal identity collision, and does not return the internal call
+  ID in its response;
+- the project-owned service delegates execution through
+  `ToolExecutionService` rather than invoking a provider directly;
+- remote MCP execution has no automatic retry loop in this foundation.
+
+Residual limitations are explicit:
+
+- `server_name` is a configured label, not authenticated or cryptographically
+  verified remote identity;
+- `MCPToolProviderAdapter`, like every `ToolProvider`, has an internal
+  `execute()` method, so architectural composition must continue to route
+  application execution through the controlled service rather than treating
+  a provider object itself as authorization;
+- there is no JSON-RPC, stdio, Streamable HTTP, or other concrete MCP wire
+  transport yet;
+- authentication and connection/session lifecycle are not implemented;
+- MCP resources and prompts are not implemented;
+- transport-level timeout, response-size, rate-limit, and network-destination
+  controls are not yet implemented;
+- remote result content remains untrusted and may contain prompt injection,
+  misleading content, or sensitive data;
+- the transport-neutral service accepts a platform
+  `ToolExecutionAuthorization` object from its trusted caller; a future remote
+  transport must derive that object from authenticated platform identity and
+  policy rather than accepting client-asserted permissions;
+- approval-required tools are excluded because authenticated durable HITL
+  approval is not yet available;
+- no shell, filesystem, or network tool is introduced by this foundation.
+
+MCP wire transports therefore remain a future security boundary requiring
+authentication, identity binding, destination controls, bounded payloads,
+timeouts, rate limits, error normalization, and protocol-level adversarial
+testing before production exposure.
 
 ### Data Exfiltration
 
@@ -810,16 +861,17 @@ The current retrieval foundation does not yet implement:
 - approximate-nearest-neighbor indexes;
 - adversarial retrieval evaluations;
 - durable/distributed conversational agent runtime;
-- MCP integration;
+- concrete MCP wire transport, authentication, resources, and prompts;
 - workflow runtime.
 
 Bounded caller-supplied text ingestion, retrieval, provider-neutral
 reranking, grounded generation, and end-to-end RAG orchestration are active
 application surfaces rather than purely anticipatory surfaces.
 Filesystem/network source acquisition, richer document parsing, public
-retrieval exposure, tenant authorization, agents, MCP, workflows, and AI
-observability remain partially or wholly anticipatory and require additional
-executable controls when introduced.
+retrieval exposure, tenant authorization, durable/distributed agent runtime,
+concrete MCP wire transports, workflows, and AI observability remain
+partially or wholly anticipatory and require additional executable controls
+when introduced.
 
 Each future feature must update this threat model when it materially
 changes:
