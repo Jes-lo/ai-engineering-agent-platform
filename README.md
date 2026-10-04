@@ -157,7 +157,7 @@ continuations remain in memory and are lost on process restart. Tool batches
 remain sequential and non-transactional, with no rollback of earlier side
 effects and no automatic retry after execution begins. Authenticated HITL
 lifecycle, MCP wire transports and authenticated connection lifecycle,
-workflows, n8n, shell tools, filesystem tools, and network tools remain
+workflows, shell tools, filesystem tools, and network tools remain
 outside the bounded-agent feature.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
@@ -262,6 +262,41 @@ transport execution timeouts, or shell/filesystem/network tools. TLS
 termination is not implemented by the application itself. Remote MCP results
 and protocol input remain untrusted data.
 
+## Project-Owned Workflow Execution Engine
+
+Feature 17 adds a project-owned workflow and execution engine without an
+external workflow-engine dependency.
+
+Implemented capabilities include:
+
+- immutable static workflow DAGs with explicit dependencies;
+- deterministic sequential execution and a hard 32-step definition ceiling;
+- typed `STRING`, `INTEGER`, `FLOAT`, and `BOOLEAN` run inputs;
+- deterministic `EQUALS` and `NOT_EQUALS` conditions without arbitrary
+  expression execution;
+- explicit `COMPLETED`, `SKIPPED`, and `FAILED` step state;
+- terminal `COMPLETED` and `FAILED` run state;
+- controlled adapters over `ToolExecutionService`, `RAGService`, and
+  `BoundedAgentLoopService`;
+- workflow-owned tool call IDs and fail-closed approval behavior;
+- no automatic retry and no rollback;
+- privacy-safe structured workflow execution events and terminal traces;
+- allowlisted operational observability metadata;
+- an injected OpenTelemetry API adapter using
+  `opentelemetry-api==1.45.0`.
+
+Workflow events intentionally exclude input values, prompts, tool arguments,
+RAG content, executor outputs, and exception text.
+
+The OpenTelemetry integration is an API-level terminal trace projection only.
+It does not configure the OpenTelemetry SDK, OTLP exporters, a Collector, a
+telemetry backend, or execution-duration measurement.
+
+Current limitations are explicit: workflow execution is process-local and
+sequential, with no durable persistence/resume, durable authenticated HITL,
+automatic retry, rollback, parallel scheduling, or arbitrary expression
+language.
+
 ## Planned Capabilities
 
 The platform is intended to evolve incrementally toward capabilities
@@ -281,7 +316,6 @@ including:
 - cross-process agent state, durable replay protection, and resumable
   continuation recovery;
 - outbound remote MCP wire-client support, stdio transport, MCP resources/prompts, and production identity-provider integration;
-- workflow automation;
 - human-in-the-loop approval;
 - guardrails;
 - richer external evaluation datasets, semantic entailment/factual correctness evaluators, and optional judge-based evaluation;

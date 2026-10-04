@@ -2,7 +2,7 @@
 
 ## Status
 
-Version: 1.5
+Version: 1.6
 
 This threat model describes the initial and evolving security assumptions
 and threat categories for the AI Engineering & Agent Platform.
@@ -220,7 +220,7 @@ model output cannot directly acquire execution authority.
 Bounded conversational looping and typed tool-result round trips are now
 implemented through `BoundedAgentLoopService`. Durable/distributed continuation
 state, richer authorization scopes, authenticated human-approval lifecycle
-controls, MCP integration, workflows, and n8n integration remain future work.
+controls, MCP integration, workflows, and external workflow-engine integration remain future work.
 
 ### LLM Tool-Call Proposal Threat Boundary
 
@@ -251,7 +251,7 @@ validated `ToolResult` content to the model through typed
 `LLMToolResultMessage` values and explicit `MessageRole.TOOL` semantics, but a
 tool result is untrusted model context rather than authorization. Any later
 model proposal must pass through the controlled execution boundary again.
-Durable/authenticated HITL state, MCP, workflows, n8n, and
+Durable/authenticated HITL state, MCP, workflows, external workflow engine, and
 shell/filesystem/network tools remain outside this feature.
 
 ### Controlled Agent Turn Orchestration Threat Boundary
@@ -297,7 +297,7 @@ Residual limitations are explicit:
   conversation history; Feature 14 composes it through a separate bounded loop;
 - bounded conversational looping exists, but its pending continuation state is
   still process-local rather than durable or distributed;
-- there is no MCP, workflow engine, n8n execution, shell tool, filesystem tool,
+- there is no MCP, workflow engine, external workflow-engine execution, shell tool, filesystem tool,
   or network tool in this orchestration layer.
 
 ### Bounded Conversational Agent Loop Threat Boundary
@@ -339,7 +339,7 @@ Residual limitations remain explicit:
 - a later provider failure cannot roll back an earlier side effect;
 - automatic retry after execution begins is intentionally absent;
 - there is no global elapsed-time budget or rate limiter in this feature;
-- MCP, workflow execution, n8n, shell tools, filesystem tools, and network
+- MCP, workflow execution, external workflow engine, shell tools, filesystem tools, and network
   tools are not introduced by this loop.
 
 ### MCP Trust Failure
@@ -915,3 +915,22 @@ materially changes:
 - persistent user data;
 - observability exports;
 - deployment infrastructure.
+
+## Workflow Execution Engine Security Posture
+
+Feature 17 adds a bounded project-owned workflow trust boundary. Executors are
+registry-controlled; inputs are exact typed scalars; conditions are deterministic
+equality/inequality only; and the engine has one executor call site.
+
+Workflow adapters reuse existing Tool, RAG, and bounded Agent services.
+Approval-required execution remains fail-closed. Automatic agent resume,
+automatic retry, rollback/compensation, parallel execution, durable persistence,
+durable resume, and durable HITL are not implemented.
+
+A failed workflow can leave earlier side effects and must not be interpreted as
+transactional rollback.
+
+Workflow telemetry is intentionally low-content and excludes input values,
+prompts, tool arguments, RAG content, outputs, and exception text. The
+OpenTelemetry integration is an API-only terminal projection with an injected
+tracer; no SDK, OTLP exporter, Collector, or telemetry backend is configured.

@@ -477,7 +477,7 @@ decision without asking the model to regenerate it.
 Loop continuation state remains process-local and in-memory. The feature does
 not claim durable recovery, distributed coordination, authenticated approver
 identity, transactional tool batches, rollback, automatic execution retries,
-MCP, workflows, n8n, or shell/filesystem/network tools.
+MCP, workflows, external workflow engine, or shell/filesystem/network tools.
 
 ### LLM Tool-Call Proposal Boundary
 
@@ -541,7 +541,7 @@ without calling the provider. `ControlledAgentService` composes that boundary
 with untrusted `LLMToolCall` proposals, and `BoundedAgentLoopService` composes
 multiple controlled turns plus validated tool-result history without granting
 the model new execution authority. Durable/distributed agent state,
-authenticated HITL approval, outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, workflow execution, n8n integration, shell tools, filesystem tools, and network tools remain future capabilities.
+authenticated HITL approval, outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, workflow execution, external workflow-engine integration, shell tools, filesystem tools, and network tools remain future capabilities.
 
 ### MCP
 
@@ -600,16 +600,30 @@ identity-provider verifier, durable authenticated HITL approval, transport
 rate limiting, execution timeouts, TLS termination, or new
 shell/filesystem/network tools. Remote MCP output remains untrusted content.
 
-### Workflows and Automation
+### Project-Owned Workflow Execution Engine
 
-Workflows may combine deterministic application logic with AI-driven
-steps.
+Feature 17 implements a project-owned, bounded workflow engine. Definitions are
+immutable static DAGs, dependencies reference earlier steps only, and workflow
+definitions are limited to 32 steps.
 
-Deterministic automation should remain deterministic where an LLM is
-not needed.
+`WorkflowEngine` performs deterministic sequential execution through
+`WorkflowExecutorRegistry`. Controlled adapters compose `ToolExecutionService`,
+`RAGService`, and `BoundedAgentLoopService`. Approval grants cannot be injected,
+approval-required execution fails closed, and agent approval is not
+automatically resumed.
 
-Human approval should be introduced for actions where the impact
-justifies confirmation.
+Inputs are exact typed scalars and conditions support typed equality/inequality
+only. There is no arbitrary expression, template, generated-code, or shell
+evaluation. Automatic retry, rollback, parallel execution, durable persistence,
+durable resume, and durable HITL are not implemented.
+
+Structural events are `RUN_STARTED`, `STEP_COMPLETED`, `STEP_SKIPPED`,
+`STEP_FAILED`, `RUN_COMPLETED`, and `RUN_FAILED`. They exclude input values,
+prompts, tool arguments, RAG content, executor outputs, and exception text.
+
+`WorkflowOpenTelemetryAdapter` provides an injected OpenTelemetry API terminal
+projection. It does not configure an SDK, OTLP exporter, Collector, telemetry
+backend, or measured workflow duration.
 
 ### Deterministic RAG Evaluation Foundation
 

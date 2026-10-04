@@ -149,6 +149,19 @@ override system policy, expand later tool authority, or be interpreted as
 trusted instructions merely because they arrived over an authenticated
 transport.
 
+### Workflow Execution Safety Boundary
+
+Workflow execution is application-controlled rather than model-controlled.
+Models and retrieved content cannot register arbitrary executors, create
+approval evidence, or bypass existing execution services.
+
+Conditions are limited to typed equality/inequality. Approval remains
+fail-closed. Workflow failures are not transactional rollbacks and failed steps
+are not automatically retried.
+
+Workflow observability follows data minimization and excludes input values,
+prompts, tool arguments, RAG content, outputs, and exception text.
+
 ## 9. Evaluate AI Behavior
 
 AI behavior should be evaluated systematically.
