@@ -15,6 +15,7 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowInput,
     WorkflowInputDefinition,
     WorkflowInputType,
+    WorkflowRunResult,
     WorkflowRunState,
     WorkflowRunStatus,
     WorkflowStepDefinition,
@@ -375,6 +376,7 @@ async def test_resume_preserves_completed_and_skipped_progress() -> None:
         run_id="workflow-run:durable-engine",
         inputs=_resume_inputs(),
     )
+    assert isinstance(result, WorkflowRunResult)
 
     assert beta.calls == []
 

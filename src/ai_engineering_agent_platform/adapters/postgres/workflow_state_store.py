@@ -9,6 +9,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import AsyncConnectionPool
 
 from ai_engineering_agent_platform.services.workflow_persistence import (
+    SUPPORTED_WORKFLOW_CHECKPOINT_FORMAT_VERSIONS,
     WORKFLOW_CHECKPOINT_FORMAT_VERSION,
     WorkflowCheckpoint,
     WorkflowCheckpointCodec,
@@ -65,8 +66,7 @@ WHERE
         workflow_checkpoints.checkpoint_payload
             = EXCLUDED.checkpoint_payload
         OR (
-            workflow_checkpoints.run_status
-                = 'running'
+            workflow_checkpoints.run_status IN ('running', 'awaiting_approval')
             AND workflow_checkpoints.event_count
                 < EXCLUDED.event_count
         )
@@ -241,7 +241,7 @@ class PostgreSQLWorkflowStateStore(WorkflowStateStore):
                 "invalid PostgreSQL workflow checkpoint field types"
             )
 
-        if checkpoint_format != WORKFLOW_CHECKPOINT_FORMAT_VERSION:
+        if checkpoint_format not in SUPPORTED_WORKFLOW_CHECKPOINT_FORMAT_VERSIONS:
             raise WorkflowPersistenceIntegrityError(
                 "stored workflow checkpoint format differs"
             )
@@ -287,7 +287,10 @@ class PostgreSQLWorkflowStateStore(WorkflowStateStore):
                 "stored workflow checkpoint metadata mismatch"
             )
 
-        canonical = self._codec.dumps(checkpoint)
+        canonical = self._codec.dumps(
+            checkpoint,
+            format_version=checkpoint_format,
+        )
 
         if canonical != payload:
             raise WorkflowPersistenceIntegrityError(

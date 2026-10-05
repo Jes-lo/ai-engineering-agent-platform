@@ -41,6 +41,10 @@ from ai_engineering_agent_platform.services import (
     ToolInputValidationError,
     ToolRegistry,
 )
+from ai_engineering_agent_platform.services.agent_continuation import (
+    AgentContinuationConflictError,
+    AgentContinuationKind,
+)
 
 
 class SyntheticLLMProvider:
@@ -1051,3 +1055,214 @@ def test_feature_13_service_surface_is_public() -> None:
             services,
             name,
         )
+
+
+class _MemoryAgentContinuationStore:
+    """Deterministic CAS store used to exercise fresh-service continuation."""
+
+    def __init__(self) -> None:
+        self.active: dict[
+            tuple[
+                AgentContinuationKind,
+                tuple[str, ...],
+            ],
+            object,
+        ] = {}
+        self.consumed: set[
+            tuple[
+                AgentContinuationKind,
+                tuple[str, ...],
+            ]
+        ] = set()
+
+    async def create(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        snapshot: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if key in self.active or key in self.consumed:
+            raise AgentContinuationConflictError("continuation already exists")
+
+        self.active[key] = snapshot
+
+    async def load(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+    ) -> object | None:
+        return self.active.get(
+            (
+                kind,
+                identity,
+            )
+        )
+
+    async def replace(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        expected: object,
+        snapshot: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if self.active.get(key) != expected:
+            raise AgentContinuationConflictError("continuation changed")
+
+        self.active[key] = snapshot
+
+    async def consume(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        expected: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if self.active.get(key) != expected:
+            raise AgentContinuationConflictError("continuation changed")
+
+        del self.active[key]
+
+        self.consumed.add(key)
+
+
+@pytest.mark.anyio
+async def test_durable_turn_continuation_resumes_in_fresh_service() -> None:
+    """Fresh service resumes the exact frozen plan without LLM regeneration."""
+    store = _MemoryAgentContinuationStore()
+    response = _tool_response(_change_proposal())
+
+    (
+        original_service,
+        original_llm,
+        original_tool_provider,
+        _,
+        _,
+    ) = _service(response)
+
+    original_service._continuation_store = store
+
+    pending = await original_service.start(
+        _turn_request(
+            run_id="durable-turn",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.status is AgentTurnStatus.APPROVAL_REQUIRED
+    assert len(original_llm.requests) == 1
+    assert original_tool_provider.invocations == []
+
+    call_id = pending.pending_approval_call_ids[0]
+
+    (
+        fresh_service,
+        fresh_llm,
+        fresh_tool_provider,
+        _,
+        _,
+    ) = _service(response)
+
+    fresh_service._continuation_store = store
+
+    resumed = await fresh_service.resume(
+        pending,
+        authorization=_authorization(
+            "change",
+            grants=(
+                ToolApprovalGrant(
+                    call_id=call_id,
+                    tool_name="change",
+                ),
+            ),
+        ),
+    )
+
+    assert resumed.status is AgentTurnStatus.TOOL_RESULTS_AVAILABLE
+    assert len(resumed.executions) == 1
+
+    assert fresh_llm.requests == []
+    assert len(fresh_tool_provider.invocations) == 1
+
+    replay_service, _, replay_tool_provider, _, _ = _service(response)
+
+    replay_service._continuation_store = store
+
+    with pytest.raises(
+        AgentResumeError,
+        match="not an active service-issued continuation",
+    ):
+        await replay_service.resume(
+            pending,
+            authorization=_authorization(
+                "change",
+                grants=(
+                    ToolApprovalGrant(
+                        call_id=call_id,
+                        tool_name="change",
+                    ),
+                ),
+            ),
+        )
+
+    assert replay_tool_provider.invocations == []
+
+
+@pytest.mark.anyio
+async def test_durable_turn_continuation_rejects_forged_snapshot() -> None:
+    """Durable issuance does not make caller-fabricated state trusted."""
+    store = _MemoryAgentContinuationStore()
+    response = _tool_response(_change_proposal())
+
+    service, _, _, _, _ = _service(response)
+
+    service._continuation_store = store
+
+    pending = await service.start(
+        _turn_request(
+            run_id="durable-forged",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    forged = AgentTurnResult(
+        run_id="forged-run",
+        status=pending.status,
+        response=pending.response,
+        planned_steps=pending.planned_steps,
+        pending_approval_call_ids=(pending.pending_approval_call_ids),
+    )
+
+    fresh, _, tool_provider, _, _ = _service(response)
+
+    fresh._continuation_store = store
+
+    with pytest.raises(
+        AgentResumeError,
+        match="not an active service-issued continuation",
+    ):
+        await fresh.resume(
+            forged,
+            authorization=_authorization("change"),
+        )
+
+    assert tool_provider.invocations == []

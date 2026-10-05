@@ -35,6 +35,7 @@ class WorkflowStepStatus(StrEnum):
 
     COMPLETED = "completed"
     SKIPPED = "skipped"
+    AWAITING_APPROVAL = "awaiting_approval"
     FAILED = "failed"
 
 
@@ -42,6 +43,7 @@ class WorkflowRunStatus(StrEnum):
     """Process-local workflow run state."""
 
     RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -52,6 +54,7 @@ class WorkflowEventType(StrEnum):
     RUN_STARTED = "run_started"
     STEP_COMPLETED = "step_completed"
     STEP_SKIPPED = "step_skipped"
+    STEP_AWAITING_APPROVAL = "step_awaiting_approval"
     STEP_FAILED = "step_failed"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
@@ -453,18 +456,82 @@ class WorkflowStepExecution:
     frozen=True,
     slots=True,
 )
+class WorkflowApprovalPause:
+    """Durable non-authoritative references for one approval pause.
+
+    These identifiers do not grant execution authority. The authenticated
+    approval lifecycle and ToolExecutionService remain authoritative.
+    """
+
+    continuation_identity: tuple[str, ...]
+    approval_ids: tuple[str, ...]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Validate bounded unique durable references."""
+        for (
+            label,
+            values,
+            max_length,
+        ) in (
+            (
+                "continuation identity",
+                self.continuation_identity,
+                512,
+            ),
+            (
+                "approval IDs",
+                self.approval_ids,
+                80,
+            ),
+        ):
+            if not isinstance(
+                values,
+                tuple,
+            ):
+                raise ValueError(f"{label} must be a tuple")
+
+            if not values or len(values) > 8:
+                raise ValueError(f"{label} must contain between 1 and 8 values")
+
+            for value in values:
+                if (
+                    not isinstance(
+                        value,
+                        str,
+                    )
+                    or not value
+                    or value != value.strip()
+                    or len(value) > max_length
+                    or any(
+                        character.isspace() or ord(character) < 32
+                        for character in value
+                    )
+                ):
+                    raise ValueError(f"{label} contains an invalid value")
+
+            if len(values) != len(set(values)):
+                raise ValueError(f"{label} values must be unique")
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class WorkflowStepState:
-    """Terminal state of one step in a process-local workflow attempt."""
+    """Validated state of one workflow step."""
 
     step_id: str
     executor_name: str
     status: WorkflowStepStatus
     execution: WorkflowStepExecution | None = None
+    approval_pause: WorkflowApprovalPause | None = None
 
     def __post_init__(
         self,
     ) -> None:
-        """Validate step-state/execution consistency."""
+        """Validate step-state, execution, and approval-pause consistency."""
         _require_identifier(
             self.step_id,
             field_name="step_id",
@@ -494,10 +561,30 @@ class WorkflowStepState:
             ):
                 raise ValueError("step state execution identity mismatch")
 
+            if self.approval_pause is not None:
+                raise ValueError("completed step state cannot contain approval pause")
+
+            return
+
+        if self.status is WorkflowStepStatus.AWAITING_APPROVAL:
+            if self.execution is not None:
+                raise ValueError("awaiting-approval step must not contain execution")
+
+            if not isinstance(
+                self.approval_pause,
+                WorkflowApprovalPause,
+            ):
+                raise ValueError("awaiting-approval step requires approval pause")
+
             return
 
         if self.execution is not None:
             raise ValueError("skipped/failed step state must not contain execution")
+
+        if self.approval_pause is not None:
+            raise ValueError(
+                "skipped/failed step state must not contain approval pause"
+            )
 
 
 @dataclass(
@@ -592,6 +679,27 @@ class WorkflowRunState:
         if self.status is not WorkflowRunStatus.FAILED and failed_count != 0:
             raise ValueError("non-failed run state must not contain failed steps")
 
+        awaiting_count = sum(
+            step.status is WorkflowStepStatus.AWAITING_APPROVAL for step in self.steps
+        )
+
+        if self.status is WorkflowRunStatus.AWAITING_APPROVAL:
+            if awaiting_count != 1:
+                raise ValueError(
+                    "awaiting-approval run state must contain exactly one awaiting step"
+                )
+
+            if (
+                not self.steps
+                or self.steps[-1].status is not WorkflowStepStatus.AWAITING_APPROVAL
+            ):
+                raise ValueError("awaiting-approval step must be the last run step")
+
+        elif awaiting_count != 0:
+            raise ValueError(
+                "non-awaiting run state must not contain awaiting-approval steps"
+            )
+
     @property
     def executions(
         self,
@@ -679,6 +787,7 @@ class WorkflowExecutionEvent:
         step_event_types = {
             WorkflowEventType.STEP_COMPLETED,
             WorkflowEventType.STEP_SKIPPED,
+            WorkflowEventType.STEP_AWAITING_APPROVAL,
             WorkflowEventType.STEP_FAILED,
         }
 

@@ -38,6 +38,10 @@ from ai_engineering_agent_platform.services import (
     ToolExecutionService,
     ToolRegistry,
 )
+from ai_engineering_agent_platform.services.agent_continuation import (
+    AgentContinuationConflictError,
+    AgentContinuationKind,
+)
 
 
 class SequenceLLMProvider:
@@ -708,3 +712,433 @@ def test_agent_loop_service_is_public() -> None:
             services,
             name,
         )
+
+
+class _MemoryLoopContinuationStore:
+    """Shared CAS store that survives service object replacement in tests."""
+
+    def __init__(self) -> None:
+        self.active: dict[
+            tuple[
+                AgentContinuationKind,
+                tuple[str, ...],
+            ],
+            object,
+        ] = {}
+        self.consumed: set[
+            tuple[
+                AgentContinuationKind,
+                tuple[str, ...],
+            ]
+        ] = set()
+
+    async def create(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        snapshot: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if key in self.active or key in self.consumed:
+            raise AgentContinuationConflictError("continuation already exists")
+
+        self.active[key] = snapshot
+
+    async def load(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+    ) -> object | None:
+        return self.active.get(
+            (
+                kind,
+                identity,
+            )
+        )
+
+    async def replace(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        expected: object,
+        snapshot: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if self.active.get(key) != expected:
+            raise AgentContinuationConflictError("continuation changed")
+
+        self.active[key] = snapshot
+
+    async def consume(
+        self,
+        *,
+        kind: AgentContinuationKind,
+        identity: tuple[str, ...],
+        expected: object,
+    ) -> None:
+        key = (
+            kind,
+            identity,
+        )
+
+        if self.active.get(key) != expected:
+            raise AgentContinuationConflictError("continuation changed")
+
+        del self.active[key]
+
+        self.consumed.add(key)
+
+
+@pytest.mark.anyio
+async def test_durable_loop_continuation_survives_service_restart() -> None:
+    """Fresh loop resumes frozen tool decision before making its next LLM call."""
+    store = _MemoryLoopContinuationStore()
+
+    (
+        original,
+        original_llm,
+        original_tool_provider,
+    ) = _stack(
+        _tool_calls(_change_call(provider_call_id="provider-durable-1")),
+        _stop("unused before restart"),
+    )
+
+    original._agent_service._continuation_store = store
+    original._continuation_store = store
+
+    pending = await original.start(
+        _loop_request(
+            run_id="durable-loop",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.status is AgentLoopStatus.APPROVAL_REQUIRED
+    assert pending.pending_turn is not None
+    assert len(original_llm.requests) == 1
+    assert original_tool_provider.invocations == []
+
+    identity = pending.pending_turn.pending_approval_call_ids
+
+    (
+        fresh,
+        fresh_llm,
+        fresh_tool_provider,
+    ) = _stack(_stop("completed after durable resume"))
+
+    fresh._agent_service._continuation_store = store
+    fresh._continuation_store = store
+
+    restored = await fresh.load_pending(identity)
+
+    assert restored == pending
+
+    call_id = identity[0]
+
+    completed = await fresh.resume(
+        restored,
+        authorization=_authorization(
+            "change",
+            grants=(
+                ToolApprovalGrant(
+                    call_id=call_id,
+                    tool_name="change",
+                ),
+            ),
+        ),
+    )
+
+    assert completed.status is AgentLoopStatus.COMPLETED
+    assert completed.model_turns_used == 2
+    assert completed.tool_calls_used == 1
+
+    # One model decision happened before the simulated restart. The fresh
+    # service calls the model only after executing that frozen decision.
+    assert len(original_llm.requests) == 1
+    assert len(fresh_llm.requests) == 1
+    assert len(fresh_tool_provider.invocations) == 1
+
+    replay, _, replay_tool_provider = _stack(_stop("must not be used"))
+
+    replay._agent_service._continuation_store = store
+    replay._continuation_store = store
+
+    with pytest.raises(
+        AgentLoopResumeError,
+        match="not an active service-issued continuation",
+    ):
+        await replay.resume(
+            restored,
+            authorization=_authorization(
+                "change",
+                grants=(
+                    ToolApprovalGrant(
+                        call_id=call_id,
+                        tool_name="change",
+                    ),
+                ),
+            ),
+        )
+
+    assert replay_tool_provider.invocations == []
+
+
+@pytest.mark.anyio
+async def test_durable_loop_missing_approval_remains_active_without_model_call() -> (
+    None
+):
+    """Fail-closed resume may replace state but cannot execute or regenerate."""
+    store = _MemoryLoopContinuationStore()
+
+    (
+        original,
+        original_llm,
+        original_tool_provider,
+    ) = _stack(
+        _tool_calls(_change_call()),
+        _stop(),
+    )
+
+    original._agent_service._continuation_store = store
+    original._continuation_store = store
+
+    pending = await original.start(
+        _loop_request(
+            run_id="durable-loop-pending",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.pending_turn is not None
+
+    identity = pending.pending_turn.pending_approval_call_ids
+
+    (
+        fresh,
+        fresh_llm,
+        fresh_tool_provider,
+    ) = _stack(_stop("must not be called"))
+
+    fresh._agent_service._continuation_store = store
+    fresh._continuation_store = store
+
+    restored = await fresh.load_pending(identity)
+
+    still_pending = await fresh.resume(
+        restored,
+        authorization=_authorization("change"),
+    )
+
+    assert still_pending.status is AgentLoopStatus.APPROVAL_REQUIRED
+    assert fresh_llm.requests == []
+    assert fresh_tool_provider.invocations == []
+    assert len(original_llm.requests) == 1
+    assert original_tool_provider.invocations == []
+
+    restored_again = await fresh.load_pending(identity)
+
+    assert restored_again == still_pending
+
+
+@pytest.mark.anyio
+async def test_durable_loop_pause_uses_only_parent_loop_continuation() -> None:
+    """A bounded loop persists LOOP only; its child TURN is not durable."""
+    store = _MemoryLoopContinuationStore()
+
+    service, llm_provider, tool_provider = _stack(
+        _tool_calls(_change_call()),
+        _stop(),
+    )
+
+    service._agent_service._continuation_store = store
+    service._continuation_store = store
+
+    pending = await service.start(
+        _loop_request(
+            run_id="parent-owned-loop-pause",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.status is AgentLoopStatus.APPROVAL_REQUIRED
+    assert pending.pending_turn is not None
+
+    identity = tuple(
+        step.invocation.call_id for step in pending.pending_turn.planned_steps
+    )
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.LOOP,
+            identity=identity,
+        )
+        == pending
+    )
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.TURN,
+            identity=identity,
+        )
+        is None
+    )
+
+    assert len(llm_provider.requests) == 1
+    assert tool_provider.invocations == []
+
+
+@pytest.mark.anyio
+async def test_durable_loop_partial_approval_keeps_only_parent_continuation() -> None:
+    """A fail-closed partial resume replaces LOOP without creating TURN."""
+    store = _MemoryLoopContinuationStore()
+
+    service, llm_provider, tool_provider = _stack(
+        _tool_calls(_change_call()),
+        _stop(),
+    )
+
+    service._agent_service._continuation_store = store
+    service._continuation_store = store
+
+    pending = await service.start(
+        _loop_request(
+            run_id="parent-owned-loop-partial",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.pending_turn is not None
+
+    identity = tuple(
+        step.invocation.call_id for step in pending.pending_turn.planned_steps
+    )
+
+    still_pending = await service.resume(
+        pending,
+        authorization=_authorization("change"),
+    )
+
+    assert still_pending.status is AgentLoopStatus.APPROVAL_REQUIRED
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.LOOP,
+            identity=identity,
+        )
+        == still_pending
+    )
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.TURN,
+            identity=identity,
+        )
+        is None
+    )
+
+    assert len(llm_provider.requests) == 1
+    assert tool_provider.invocations == []
+
+
+@pytest.mark.anyio
+async def test_parent_loop_gate_consumes_before_tool_side_effects() -> None:
+    """A parent-gate persistence conflict prevents provider execution."""
+
+    class RejectParentConsumeStore(_MemoryLoopContinuationStore):
+        async def consume(
+            self,
+            *,
+            kind: AgentContinuationKind,
+            identity: tuple[str, ...],
+            expected: object,
+        ) -> None:
+            if kind is AgentContinuationKind.LOOP:
+                raise AgentContinuationConflictError(
+                    "synthetic parent consume conflict"
+                )
+
+            await super().consume(
+                kind=kind,
+                identity=identity,
+                expected=expected,
+            )
+
+    store = RejectParentConsumeStore()
+
+    service, llm_provider, tool_provider = _stack(
+        _tool_calls(_change_call()),
+        _stop(),
+    )
+
+    service._agent_service._continuation_store = store
+    service._continuation_store = store
+
+    pending = await service.start(
+        _loop_request(
+            run_id="parent-gate-before-side-effect",
+            exposed_tool_names=("change",),
+        ),
+        authorization=_authorization("change"),
+    )
+
+    assert pending.pending_turn is not None
+
+    identity = tuple(
+        step.invocation.call_id for step in pending.pending_turn.planned_steps
+    )
+
+    call_id = pending.pending_turn.pending_approval_call_ids[0]
+
+    with pytest.raises(
+        AgentLoopResumeError,
+        match="not an active service-issued continuation",
+    ):
+        await service.resume(
+            pending,
+            authorization=_authorization(
+                "change",
+                grants=(
+                    ToolApprovalGrant(
+                        call_id=call_id,
+                        tool_name="change",
+                    ),
+                ),
+            ),
+        )
+
+    # The LOOP consume failed before ToolExecutionService/provider execution.
+    assert tool_provider.invocations == []
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.LOOP,
+            identity=identity,
+        )
+        == pending
+    )
+
+    assert (
+        await store.load(
+            kind=AgentContinuationKind.TURN,
+            identity=identity,
+        )
+        is None
+    )
+
+    # No post-pause model regeneration occurred either.
+    assert len(llm_provider.requests) == 1

@@ -21,6 +21,13 @@ from ai_engineering_agent_platform.services.agent import (
     AgentTurnStatus,
     ControlledAgentService,
 )
+from ai_engineering_agent_platform.services.agent_continuation import (
+    AgentContinuationConflictError,
+    AgentContinuationError,
+    AgentContinuationKind,
+    AgentContinuationStore,
+    validate_agent_continuation_identity,
+)
 from ai_engineering_agent_platform.services.tool_execution import (
     ToolExecutionAuthorization,
 )
@@ -243,13 +250,15 @@ class BoundedAgentLoopService:
     must pass the same registration, exposure, authorization, approval,
     preflight, and execution controls on every iteration.
 
-    Loop continuation state is process-local and in-memory.
+    Loop continuation state is process-local by default and may use an
+    injected durable store.
     """
 
     def __init__(
         self,
         *,
         agent_service: ControlledAgentService,
+        continuation_store: AgentContinuationStore | None = None,
     ) -> None:
         """Store the existing controlled agent-turn boundary."""
         if not isinstance(
@@ -259,6 +268,25 @@ class BoundedAgentLoopService:
             raise ValueError("agent_service must be a ControlledAgentService")
 
         self._agent_service = agent_service
+
+        effective_store = (
+            agent_service.continuation_store
+            if continuation_store is None
+            else continuation_store
+        )
+
+        if effective_store is not None and not isinstance(
+            effective_store,
+            AgentContinuationStore,
+        ):
+            raise ValueError("continuation_store must implement AgentContinuationStore")
+
+        if agent_service.continuation_store is not effective_store:
+            raise ValueError(
+                "agent and loop services must share the same continuation store"
+            )
+
+        self._continuation_store = effective_store
 
         self._pending_loops: dict[
             tuple[str, ...],
@@ -307,21 +335,23 @@ class BoundedAgentLoopService:
 
         key = self._pending_key(pending.pending_turn)
 
-        issued = self._pending_loops.get(key)
+        issued = await self._load_pending(key)
 
         if issued is None or issued != pending:
             raise AgentLoopResumeError(
                 "pending loop is not an active service-issued continuation"
             )
 
-        # Consume the loop continuation before delegating to the controlled
-        # resume boundary. A failure after tool execution begins must not make
-        # the conversational continuation automatically replayable.
-        del self._pending_loops[key]
+        async def consume_parent_replay_gate() -> None:
+            await self._consume_pending(
+                key,
+                expected=issued,
+            )
 
-        resumed_turn = await self._agent_service.resume(
+        resumed_turn = await self._agent_service._resume_parent_owned(
             pending.pending_turn,
             authorization=authorization,
+            before_execute=consume_parent_replay_gate,
         )
 
         if resumed_turn.status is AgentTurnStatus.APPROVAL_REQUIRED:
@@ -334,12 +364,19 @@ class BoundedAgentLoopService:
                 pending_turn=resumed_turn,
             )
 
-            self._register_pending(still_pending)
+            await self._replace_pending(
+                key,
+                expected=issued,
+                pending=still_pending,
+            )
 
             return still_pending
 
         if resumed_turn.status is not AgentTurnStatus.TOOL_RESULTS_AVAILABLE:
             raise AgentLoopResumeError("resumed turn returned an invalid loop state")
+
+        # A successful tool result means the parent LOOP replay gate was
+        # consumed immediately before provider side effects began.
 
         next_tool_calls_used = pending.tool_calls_used + len(resumed_turn.executions)
 
@@ -421,7 +458,7 @@ class BoundedAgentLoopService:
             )
 
             try:
-                turn = await self._agent_service.start(
+                turn = await self._agent_service._start_parent_owned(
                     turn_request,
                     authorization=authorization,
                 )
@@ -465,7 +502,7 @@ class BoundedAgentLoopService:
                     pending_turn=turn,
                 )
 
-                self._register_pending(pending)
+                await self._register_pending(pending)
 
                 return pending
 
@@ -524,20 +561,157 @@ class BoundedAgentLoopService:
             *tool_messages,
         )
 
-    def _register_pending(
+    async def load_pending(
+        self,
+        identity: tuple[str, ...],
+    ) -> AgentLoopResult:
+        """Load one active service-issued loop continuation by call identity."""
+        key = validate_agent_continuation_identity(identity)
+
+        pending = await self._load_pending(key)
+
+        if pending is None:
+            raise AgentLoopResumeError(
+                "pending loop is not an active service-issued continuation"
+            )
+
+        return pending
+
+    async def _register_pending(
         self,
         pending: AgentLoopResult,
     ) -> None:
-        """Register one loop continuation exactly once in process memory."""
+        """Register one exact service-issued loop continuation."""
         if pending.pending_turn is None:
             raise AgentLoopResumeError("pending loop has no pending turn")
 
         key = self._pending_key(pending.pending_turn)
 
-        if key in self._pending_loops:
-            raise AgentLoopResumeError("pending loop identity is already active")
+        if self._continuation_store is None:
+            if key in self._pending_loops:
+                raise AgentLoopResumeError("pending loop identity is already active")
 
-        self._pending_loops[key] = pending
+            self._pending_loops[key] = pending
+            return
+
+        try:
+            await self._continuation_store.create(
+                kind=AgentContinuationKind.LOOP,
+                identity=key,
+                snapshot=pending,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentLoopResumeError(
+                "pending loop identity is already active"
+            ) from exc
+        except AgentContinuationError as exc:
+            raise AgentLoopResumeError(
+                "durable pending loop registration failed"
+            ) from exc
+
+    async def _load_pending(
+        self,
+        key: tuple[str, ...],
+    ) -> AgentLoopResult | None:
+        """Load one exact active loop continuation."""
+        if self._continuation_store is None:
+            return self._pending_loops.get(key)
+
+        try:
+            snapshot = await self._continuation_store.load(
+                kind=AgentContinuationKind.LOOP,
+                identity=key,
+            )
+        except AgentContinuationError as exc:
+            raise AgentLoopResumeError("durable pending loop lookup failed") from exc
+
+        if snapshot is None:
+            return None
+
+        if not isinstance(
+            snapshot,
+            AgentLoopResult,
+        ):
+            raise AgentLoopResumeError("durable pending loop has invalid type")
+
+        if (
+            snapshot.status is not AgentLoopStatus.APPROVAL_REQUIRED
+            or snapshot.pending_turn is None
+        ):
+            raise AgentLoopResumeError("durable pending loop has invalid status")
+
+        if self._pending_key(snapshot.pending_turn) != key:
+            raise AgentLoopResumeError("durable pending loop identity mismatch")
+
+        return snapshot
+
+    async def _replace_pending(
+        self,
+        key: tuple[str, ...],
+        *,
+        expected: AgentLoopResult,
+        pending: AgentLoopResult,
+    ) -> None:
+        """Replace an active loop pause that still requires approval."""
+        if self._continuation_store is None:
+            issued = self._pending_loops.get(key)
+
+            if issued is None or issued != expected:
+                raise AgentLoopResumeError(
+                    "pending loop is not an active service-issued continuation"
+                )
+
+            self._pending_loops[key] = pending
+            return
+
+        try:
+            await self._continuation_store.replace(
+                kind=AgentContinuationKind.LOOP,
+                identity=key,
+                expected=expected,
+                snapshot=pending,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentLoopResumeError(
+                "pending loop is not an active service-issued continuation"
+            ) from exc
+        except AgentContinuationError as exc:
+            raise AgentLoopResumeError(
+                "durable pending loop replacement failed"
+            ) from exc
+
+    async def _consume_pending(
+        self,
+        key: tuple[str, ...],
+        *,
+        expected: AgentLoopResult,
+    ) -> None:
+        """Consume outer loop continuation after inner turn replay gate."""
+        if self._continuation_store is None:
+            issued = self._pending_loops.get(key)
+
+            if issued is None or issued != expected:
+                raise AgentLoopResumeError(
+                    "pending loop is not an active service-issued continuation"
+                )
+
+            del self._pending_loops[key]
+            return
+
+        try:
+            await self._continuation_store.consume(
+                kind=AgentContinuationKind.LOOP,
+                identity=key,
+                expected=expected,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentLoopResumeError(
+                "pending loop is not an active service-issued continuation"
+            ) from exc
+        except AgentContinuationError as exc:
+            raise AgentLoopResumeError(
+                "durable pending loop consumption failed"
+            ) from exc
 
     @staticmethod
     def _pending_key(
@@ -546,11 +720,11 @@ class BoundedAgentLoopService:
         str,
         ...,
     ]:
-        """Return the controlled pending-call identity for one loop pause."""
+        """Return stable frozen-plan identity for one loop pause."""
         if pending_turn.status is not AgentTurnStatus.APPROVAL_REQUIRED:
             raise AgentLoopResumeError("pending turn does not require approval")
 
         if not pending_turn.pending_approval_call_ids:
             raise AgentLoopResumeError("pending turn has no approval call IDs")
 
-        return pending_turn.pending_approval_call_ids
+        return tuple(step.invocation.call_id for step in pending_turn.planned_steps)
