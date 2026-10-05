@@ -56,6 +56,11 @@ from ai_engineering_agent_platform.contracts import (
     ToolInvocation,
     ToolResult,
 )
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailCategory,
+    GuardrailSeverity,
+    GuardrailStage,
+)
 from ai_engineering_agent_platform.domain.workflow import (
     WorkflowDefinition,
     WorkflowEventType,
@@ -85,6 +90,12 @@ from ai_engineering_agent_platform.services.approval import (
     ApprovalService,
     ApprovalStatus,
     AuthenticatedApprovalActor,
+)
+from ai_engineering_agent_platform.services.guardrails import (
+    GuardrailLiteralPattern,
+    GuardrailPolicy,
+    GuardrailService,
+    LiteralPatternGuardrailRule,
 )
 from ai_engineering_agent_platform.services.tool_execution import (
     ToolExecutionAuthorization,
@@ -325,6 +336,38 @@ def _request_factory(
     )
 
 
+def _agent_guardrail_service() -> GuardrailService:
+    """Return non-blocking runtime guards for the durable HITL E2E."""
+    stages = (
+        GuardrailStage.USER_INPUT,
+        GuardrailStage.TOOL_RESULT,
+        GuardrailStage.MODEL_OUTPUT,
+    )
+
+    return GuardrailService(
+        policy=GuardrailPolicy(
+            enabled_stages=stages,
+            block_at_or_above=GuardrailSeverity.HIGH,
+            max_content_chars=100_000,
+            max_findings=64,
+        ),
+        rules=(
+            LiteralPatternGuardrailRule(
+                rule_id="live-hitl-agent-runtime-rule",
+                stages=stages,
+                patterns=(
+                    GuardrailLiteralPattern(
+                        literal=("__live_hitl_guardrail_marker_not_present__"),
+                        category=GuardrailCategory.OTHER,
+                        severity=GuardrailSeverity.LOW,
+                        message="configured live HITL guardrail signal",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def _loop(
     *,
     llm_provider: SequenceLLMProvider,
@@ -345,6 +388,7 @@ def _loop(
 
     agent = ControlledAgentService(
         llm_provider=llm_provider,
+        guardrail_service=_agent_guardrail_service(),
         registry=registry,
         tool_execution=(ToolExecutionService(registry)),
         continuation_store=(continuation_store),

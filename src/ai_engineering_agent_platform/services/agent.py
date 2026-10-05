@@ -15,12 +15,20 @@ from ai_engineering_agent_platform.contracts import (
     ToolDefinition,
     ToolInvocation,
 )
+from ai_engineering_agent_platform.contracts import (
+    MessageRole as GuardrailMessageRole,
+)
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailStage,
+    GuardrailSubject,
+)
 from ai_engineering_agent_platform.services.agent_continuation import (
     AgentContinuationConflictError,
     AgentContinuationError,
     AgentContinuationKind,
     AgentContinuationStore,
 )
+from ai_engineering_agent_platform.services.guardrails import GuardrailService
 from ai_engineering_agent_platform.services.tool_execution import (
     ControlledToolExecutionResult,
     ToolApprovalRequiredError,
@@ -37,6 +45,53 @@ _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 class AgentOrchestrationError(Exception):
     """Base error for controlled agent-turn orchestration."""
+
+
+class AgentGuardrailError(AgentOrchestrationError):
+    """Base error for deterministic agent runtime guardrail enforcement."""
+
+
+class AgentGuardrailContractError(AgentGuardrailError):
+    """A guardrail result violated the agent runtime safety contract."""
+
+
+class AgentGuardrailBlockedError(AgentGuardrailError):
+    """Untrusted agent content was blocked at a model boundary."""
+
+    def __init__(
+        self,
+        *,
+        stage: GuardrailStage,
+        content_id: str,
+        blocking_rule_ids: tuple[str, ...],
+    ) -> None:
+        """Store bounded non-content metadata for one blocked boundary."""
+        if not isinstance(stage, GuardrailStage):
+            raise TypeError("stage must be a GuardrailStage")
+
+        if not isinstance(content_id, str) or not content_id.strip():
+            raise ValueError("content_id must not be empty")
+
+        if not isinstance(blocking_rule_ids, tuple):
+            raise TypeError("blocking_rule_ids must be a tuple")
+
+        if not blocking_rule_ids:
+            raise ValueError("blocking_rule_ids must not be empty")
+
+        if not all(
+            isinstance(rule_id, str) and rule_id.strip()
+            for rule_id in blocking_rule_ids
+        ):
+            raise ValueError("blocking_rule_ids must contain non-empty strings")
+
+        if len(blocking_rule_ids) != len(set(blocking_rule_ids)):
+            raise ValueError("blocking_rule_ids must be unique")
+
+        self.stage = stage
+        self.content_id = content_id
+        self.blocking_rule_ids = blocking_rule_ids
+
+        super().__init__("agent content blocked by deterministic guardrail policy")
 
 
 class AgentResponseError(AgentOrchestrationError):
@@ -332,6 +387,7 @@ class ControlledAgentService:
         self,
         *,
         llm_provider: LLMProvider,
+        guardrail_service: GuardrailService,
         registry: ToolRegistry,
         tool_execution: ToolExecutionService,
         continuation_store: AgentContinuationStore | None = None,
@@ -344,6 +400,33 @@ class ControlledAgentService:
         ) = None,
     ) -> None:
         """Store explicit model, registry, execution, and identity boundaries."""
+
+        if not isinstance(
+            guardrail_service,
+            GuardrailService,
+        ):
+            raise TypeError("guardrail_service must be GuardrailService")
+
+        required_guardrail_stages = {
+            GuardrailStage.USER_INPUT,
+            GuardrailStage.TOOL_RESULT,
+            GuardrailStage.MODEL_OUTPUT,
+        }
+
+        missing_guardrail_stages = required_guardrail_stages - set(
+            guardrail_service.policy.enabled_stages
+        )
+
+        if missing_guardrail_stages:
+            missing = ", ".join(
+                sorted(stage.value for stage in missing_guardrail_stages)
+            )
+
+            raise ValueError(
+                "agent guardrail policy is missing required stages: " + missing
+            )
+
+        self._guardrail_service = guardrail_service
         self._llm_provider = llm_provider
         self._registry = registry
         self._tool_execution = tool_execution
@@ -363,6 +446,106 @@ class ControlledAgentService:
             tuple[str, ...],
             AgentTurnResult,
         ] = {}
+
+    def _enforce_guardrail(
+        self,
+        *,
+        stage: GuardrailStage,
+        content_id: str,
+        content: str,
+    ) -> None:
+        """Evaluate transient content and fail closed on BLOCK."""
+        evaluation = self._guardrail_service.evaluate(
+            GuardrailSubject(
+                content_id=content_id,
+                stage=stage,
+                content=content,
+            )
+        )
+
+        if evaluation.content_id != content_id:
+            raise AgentGuardrailContractError(
+                "guardrail evaluation content identity mismatch"
+            )
+
+        if evaluation.stage is not stage:
+            raise AgentGuardrailContractError("guardrail evaluation stage mismatch")
+
+        if evaluation.allowed:
+            return
+
+        threshold = self._guardrail_service.policy.block_at_or_above
+
+        blocking_rule_ids = tuple(
+            dict.fromkeys(
+                finding.rule_id
+                for finding in evaluation.findings
+                if finding.severity >= threshold
+            )
+        )
+
+        if not blocking_rule_ids:
+            raise AgentGuardrailContractError(
+                "blocking evaluation lacks threshold-level findings"
+            )
+
+        raise AgentGuardrailBlockedError(
+            stage=stage,
+            content_id=content_id,
+            blocking_rule_ids=blocking_rule_ids,
+        )
+
+    def _guard_llm_request_context(
+        self,
+        *,
+        run_id: str,
+        request: LLMRequest,
+    ) -> None:
+        """Guard user and tool-result text immediately before model use."""
+        for index, message in enumerate(request.messages):
+            if message.role is GuardrailMessageRole.USER:
+                stage = GuardrailStage.USER_INPUT
+            elif message.role is GuardrailMessageRole.TOOL:
+                stage = GuardrailStage.TOOL_RESULT
+            else:
+                continue
+
+            self._enforce_guardrail(
+                stage=stage,
+                content_id=(f"{run_id}:{stage.value}:{index}"),
+                content=message.content,
+            )
+
+    def _guard_llm_response(
+        self,
+        *,
+        run_id: str,
+        response: LLMResponse,
+    ) -> None:
+        """Guard model text before interpretation or controlled execution."""
+        self._enforce_guardrail(
+            stage=GuardrailStage.MODEL_OUTPUT,
+            content_id=(f"{run_id}:model_output:message"),
+            content=response.message.content,
+        )
+
+        for call_index, proposal in enumerate(response.tool_calls):
+            for argument_index, argument in enumerate(proposal.arguments):
+                if not isinstance(
+                    argument.value,
+                    str,
+                ):
+                    continue
+
+                self._enforce_guardrail(
+                    stage=GuardrailStage.MODEL_OUTPUT,
+                    content_id=(
+                        f"{run_id}:model_output:"
+                        f"tool:{call_index}:"
+                        f"argument:{argument_index}"
+                    ),
+                    content=argument.value,
+                )
 
     async def start(
         self,
@@ -425,7 +608,17 @@ class ControlledAgentService:
             tools=definitions,
         )
 
+        self._guard_llm_request_context(
+            run_id=request.run_id,
+            request=runtime_request,
+        )
+
         response = await self._llm_provider.generate(runtime_request)
+
+        self._guard_llm_response(
+            run_id=request.run_id,
+            response=response,
+        )
 
         if response.finish_reason is FinishReason.STOP:
             return AgentTurnResult(

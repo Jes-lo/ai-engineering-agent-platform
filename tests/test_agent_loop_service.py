@@ -23,9 +23,15 @@ from ai_engineering_agent_platform.contracts import (
     ToolParameterType,
     ToolResult,
 )
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailCategory,
+    GuardrailSeverity,
+    GuardrailStage,
+)
 from ai_engineering_agent_platform.services import (
     MAX_AGENT_LOOP_MODEL_TURNS,
     MAX_AGENT_LOOP_TOOL_CALLS,
+    AgentGuardrailBlockedError,
     AgentLoopBudgetError,
     AgentLoopRequest,
     AgentLoopResumeError,
@@ -41,6 +47,12 @@ from ai_engineering_agent_platform.services import (
 from ai_engineering_agent_platform.services.agent_continuation import (
     AgentContinuationConflictError,
     AgentContinuationKind,
+)
+from ai_engineering_agent_platform.services.guardrails import (
+    GuardrailLiteralPattern,
+    GuardrailPolicy,
+    GuardrailService,
+    LiteralPatternGuardrailRule,
 )
 
 
@@ -255,6 +267,42 @@ def _loop_request(
     )
 
 
+def _agent_guardrail_service(
+    *,
+    literal: str = "__agent_guardrail_marker_not_present__",
+    severity: GuardrailSeverity = GuardrailSeverity.LOW,
+) -> GuardrailService:
+    """Return complete deterministic loop guardrail coverage."""
+    stages = (
+        GuardrailStage.USER_INPUT,
+        GuardrailStage.TOOL_RESULT,
+        GuardrailStage.MODEL_OUTPUT,
+    )
+
+    return GuardrailService(
+        policy=GuardrailPolicy(
+            enabled_stages=stages,
+            block_at_or_above=GuardrailSeverity.HIGH,
+            max_content_chars=100_000,
+            max_findings=64,
+        ),
+        rules=(
+            LiteralPatternGuardrailRule(
+                rule_id="agent-loop-runtime-test-rule",
+                stages=stages,
+                patterns=(
+                    GuardrailLiteralPattern(
+                        literal=literal,
+                        category=GuardrailCategory.OTHER,
+                        severity=severity,
+                        message="configured synthetic loop signal",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def _stack(
     *responses: LLMResponse,
 ) -> tuple[
@@ -289,6 +337,7 @@ def _stack(
 
     controlled_agent = ControlledAgentService(
         llm_provider=llm_provider,
+        guardrail_service=_agent_guardrail_service(),
         registry=registry,
         tool_execution=tool_execution,
         call_id_factory=(
@@ -1142,3 +1191,47 @@ async def test_parent_loop_gate_consumes_before_tool_side_effects() -> None:
 
     # No post-pause model regeneration occurred either.
     assert len(llm_provider.requests) == 1
+
+
+@pytest.mark.anyio
+async def test_tool_result_guardrail_blocks_before_next_llm_turn() -> None:
+    """Blocked tool output must not reach a subsequent model turn."""
+    marker = "result:lookup"
+
+    (
+        service,
+        llm_provider,
+        tool_provider,
+    ) = _stack(
+        _tool_calls(
+            _lookup_call("guarded-tool-result"),
+        ),
+        _stop("must not be generated"),
+    )
+
+    service._agent_service._guardrail_service = _agent_guardrail_service(
+        literal=marker,
+        severity=GuardrailSeverity.HIGH,
+    )
+
+    with pytest.raises(
+        AgentGuardrailBlockedError,
+        match="blocked by deterministic guardrail policy",
+    ) as exc_info:
+        await service.start(
+            _loop_request(),
+            authorization=_authorization("lookup"),
+        )
+
+    error = exc_info.value
+
+    assert error.stage is GuardrailStage.TOOL_RESULT
+    assert error.blocking_rule_ids == ("agent-loop-runtime-test-rule",)
+
+    assert len(llm_provider.requests) == 1
+    assert len(tool_provider.invocations) == 1
+
+    assert tool_provider.invocations[0].tool_name == "lookup"
+
+    assert marker not in str(error)
+    assert marker not in repr(error)

@@ -98,7 +98,7 @@ Sequential multi-tool execution is not atomic. Earlier successful side effects
 are not rolled back if a later provider execution fails, and automatic retries
 after execution starts remain intentionally absent.
 
-Future hardening includes durable/distributed continuation state, authenticated human-approval lifecycle controls, elapsed-time/rate budgets, stronger audit/observability support, outbound remote MCP wire transport, MCP resources/prompts, and workflow capabilities. Those additions must preserve the same authority boundaries.
+Current hardening includes durable continuation foundations, authenticated human-approval lifecycle controls, deterministic runtime guardrails, adversarial guardrail evaluation, and low-content observability projections. Future hardening still includes elapsed-time/rate budgets, outbound remote MCP wire transport, MCP resources/prompts, broader production identity integration, and centralized telemetry backends. Those additions must preserve the same authority boundaries.
 
 ## 7. Minimize Sensitive Context
 
@@ -222,3 +222,52 @@ Controls should be introduced when the corresponding risk becomes real.
 
 The project should not claim that a safety control exists until it is
 implemented and, where practical, tested.
+
+## Deterministic Runtime Guardrails
+
+Runtime guardrails are deterministic application controls, not model authority.
+The current guardrail boundary covers four explicit stages:
+
+- `USER_INPUT` before user content reaches an LLM provider;
+- `RETRIEVED_CONTEXT` before retrieved evidence is assembled into a grounded
+  generation request;
+- `TOOL_RESULT` before controlled tool output is reused as model context;
+- `MODEL_OUTPUT` after model generation and before downstream tool execution,
+  including string-valued model-generated tool arguments.
+
+Configured rules fail closed on rule execution errors, malformed findings,
+foreign rule identities, unsupported stages, excessive content, and excessive
+finding counts. Guardrails do not grant tool authority or approval authority.
+`ToolExecutionService` remains the final tool-execution authority and
+`ApprovalService` remains the human-approval authority.
+
+The initial deterministic rule implementation includes literal-pattern
+detection. Literal matching is intentionally transparent and testable, but it
+is not semantic prompt-injection detection. Equivalent or paraphrased malicious
+instructions can evade a literal rule. The platform therefore does not claim
+that direct or indirect prompt injection is eliminated.
+
+## Guardrail Evaluation and Privacy-Safe Observability
+
+Guardrail adversarial evaluation uses versioned, provenance-labelled synthetic
+datasets and deterministic expected actions. Evaluation runs retain structural
+case results and aggregate metrics rather than subject content, finding
+messages, match offsets, or rule identifiers. The current metrics expose
+expected-block recall, expected-allow rate, action accuracy, missed blocks, and
+unexpected blocks.
+
+The repository-owned adversarial baseline deliberately includes a paraphrased
+prompt-injection case that is not detected by the current literal rule. This is
+reported as a missed block rather than hidden or reclassified as benign.
+
+Guardrail observability is a separate low-content projection. Exported
+attributes are restricted to stage, action, counts, fixed finding categories,
+maximum severity, and an observability-mode marker. Content identifiers, rule
+identifiers, finding messages, offsets, prompts, retrieved content, tool
+results, and model output are excluded.
+
+`GuardrailOpenTelemetryAdapter` consumes an externally configured
+OpenTelemetry API `Tracer`. It configures no SDK, exporter, Collector, endpoint,
+credentials, transport, or backend, and disables automatic exception
+recording. A policy `BLOCK` is represented as a successful policy decision with
+an explicit action attribute rather than as an instrumentation failure.

@@ -21,8 +21,14 @@ from ai_engineering_agent_platform.contracts import (
     ToolParameterType,
     ToolResult,
 )
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailCategory,
+    GuardrailSeverity,
+    GuardrailStage,
+)
 from ai_engineering_agent_platform.services import (
     MAX_AGENT_TURN_STEPS,
+    AgentGuardrailBlockedError,
     AgentOrchestrationError,
     AgentPlannedToolCall,
     AgentResponseError,
@@ -44,6 +50,12 @@ from ai_engineering_agent_platform.services import (
 from ai_engineering_agent_platform.services.agent_continuation import (
     AgentContinuationConflictError,
     AgentContinuationKind,
+)
+from ai_engineering_agent_platform.services.guardrails import (
+    GuardrailLiteralPattern,
+    GuardrailPolicy,
+    GuardrailService,
+    LiteralPatternGuardrailRule,
 )
 
 
@@ -169,6 +181,42 @@ def _policies(
             tool_name="change",
             enabled=change_enabled,
             requires_approval=True,
+        ),
+    )
+
+
+def _agent_guardrail_service(
+    *,
+    literal: str = "__agent_guardrail_marker_not_present__",
+    severity: GuardrailSeverity = GuardrailSeverity.LOW,
+) -> GuardrailService:
+    """Return complete deterministic agent guardrail coverage."""
+    stages = (
+        GuardrailStage.USER_INPUT,
+        GuardrailStage.TOOL_RESULT,
+        GuardrailStage.MODEL_OUTPUT,
+    )
+
+    return GuardrailService(
+        policy=GuardrailPolicy(
+            enabled_stages=stages,
+            block_at_or_above=GuardrailSeverity.HIGH,
+            max_content_chars=100_000,
+            max_findings=64,
+        ),
+        rules=(
+            LiteralPatternGuardrailRule(
+                rule_id="agent-runtime-test-rule",
+                stages=stages,
+                patterns=(
+                    GuardrailLiteralPattern(
+                        literal=literal,
+                        category=GuardrailCategory.OTHER,
+                        severity=severity,
+                        message="configured synthetic agent signal",
+                    ),
+                ),
+            ),
         ),
     )
 
@@ -340,6 +388,7 @@ def _service(
 
     service = ControlledAgentService(
         llm_provider=llm_provider,
+        guardrail_service=_agent_guardrail_service(),
         registry=registry,
         tool_execution=tool_execution,
         call_id_factory=call_id_factory,
@@ -938,6 +987,7 @@ async def test_call_id_factory_must_not_reuse_provider_id() -> None:
 
     service = ControlledAgentService(
         llm_provider=llm_provider,
+        guardrail_service=_agent_guardrail_service(),
         registry=registry,
         tool_execution=(ToolExecutionService(registry)),
         call_id_factory=(lambda _run_id, _step: "provider-call-1"),
@@ -974,6 +1024,7 @@ async def test_call_id_factory_must_generate_unique_batch_ids() -> None:
 
     service = ControlledAgentService(
         llm_provider=llm_provider,
+        guardrail_service=_agent_guardrail_service(),
         registry=registry,
         tool_execution=(ToolExecutionService(registry)),
         call_id_factory=(lambda _run_id, _step: "duplicate-call"),
@@ -1266,3 +1317,153 @@ async def test_durable_turn_continuation_rejects_forged_snapshot() -> None:
         )
 
     assert tool_provider.invocations == []
+
+
+@pytest.mark.anyio
+async def test_user_input_guardrail_blocks_before_llm() -> None:
+    """Blocked user input must never reach the LLM provider."""
+    marker = "Perform the synthetic task."
+
+    (
+        service,
+        llm_provider,
+        tool_provider,
+        _,
+        _,
+    ) = _service(_stop_response())
+
+    service._guardrail_service = _agent_guardrail_service(
+        literal=marker,
+        severity=GuardrailSeverity.HIGH,
+    )
+
+    with pytest.raises(
+        AgentGuardrailBlockedError,
+        match="blocked by deterministic guardrail policy",
+    ) as exc_info:
+        await service.start(
+            _turn_request(),
+            authorization=_authorization("lookup"),
+        )
+
+    error = exc_info.value
+
+    assert error.stage is GuardrailStage.USER_INPUT
+    assert error.blocking_rule_ids == ("agent-runtime-test-rule",)
+
+    assert llm_provider.requests == []
+    assert tool_provider.invocations == []
+
+    assert marker not in str(error)
+    assert marker not in repr(error)
+
+
+@pytest.mark.anyio
+async def test_model_message_guardrail_blocks_before_tool_execution() -> None:
+    """Blocked assistant text must stop before tool execution."""
+    marker = "blocked model output"
+
+    response = LLMResponse(
+        model="synthetic-model",
+        message=LLMMessage(
+            role=MessageRole.ASSISTANT,
+            content=marker,
+        ),
+        finish_reason=FinishReason.TOOL_CALLS,
+        tool_calls=(_lookup_proposal(),),
+    )
+
+    (
+        service,
+        llm_provider,
+        tool_provider,
+        _,
+        _,
+    ) = _service(response)
+
+    service._guardrail_service = _agent_guardrail_service(
+        literal=marker,
+        severity=GuardrailSeverity.HIGH,
+    )
+
+    with pytest.raises(
+        AgentGuardrailBlockedError,
+        match="blocked by deterministic guardrail policy",
+    ) as exc_info:
+        await service.start(
+            _turn_request(),
+            authorization=_authorization("lookup"),
+        )
+
+    error = exc_info.value
+
+    assert error.stage is GuardrailStage.MODEL_OUTPUT
+    assert error.blocking_rule_ids == ("agent-runtime-test-rule",)
+
+    assert len(llm_provider.requests) == 1
+    assert tool_provider.invocations == []
+
+    assert marker not in str(error)
+    assert marker not in repr(error)
+
+
+@pytest.mark.anyio
+async def test_model_tool_argument_guardrail_blocks_before_execution() -> None:
+    """String-valued tool arguments remain untrusted model output."""
+    marker = "blocked-tool-argument"
+
+    (
+        service,
+        llm_provider,
+        tool_provider,
+        _,
+        _,
+    ) = _service(
+        _tool_response(
+            _lookup_proposal(marker),
+        )
+    )
+
+    service._guardrail_service = _agent_guardrail_service(
+        literal=marker,
+        severity=GuardrailSeverity.HIGH,
+    )
+
+    with pytest.raises(
+        AgentGuardrailBlockedError,
+        match="blocked by deterministic guardrail policy",
+    ) as exc_info:
+        await service.start(
+            _turn_request(),
+            authorization=_authorization("lookup"),
+        )
+
+    error = exc_info.value
+
+    assert error.stage is GuardrailStage.MODEL_OUTPUT
+    assert error.blocking_rule_ids == ("agent-runtime-test-rule",)
+
+    assert len(llm_provider.requests) == 1
+    assert tool_provider.invocations == []
+
+    assert marker not in str(error)
+    assert marker not in repr(error)
+
+
+def test_agent_guardrail_errors_are_publicly_exported() -> None:
+    """Agent guardrail errors remain public application types."""
+    import ai_engineering_agent_platform.services as services
+
+    expected = {
+        "AgentGuardrailBlockedError",
+        "AgentGuardrailContractError",
+        "AgentGuardrailError",
+    }
+
+    assert expected <= set(services.__all__)
+
+    for name in expected:
+        assert hasattr(
+            services,
+            name,
+        )
