@@ -614,7 +614,7 @@ automatically resumed.
 
 Inputs are exact typed scalars and conditions support typed equality/inequality
 only. There is no arbitrary expression, template, generated-code, or shell
-evaluation. Automatic retry, rollback, parallel execution, and durable authenticated HITL are not implemented. Durable workflow checkpoint persistence and explicit resume are implemented behind the application-owned `WorkflowStateStore` boundary. Resume is caller-initiated, accepts only validated `RUNNING` checkpoints, and does not claim exactly-once executor side effects.
+evaluation. Automatic retry, rollback, and parallel execution are not implemented. Durable authenticated HITL is implemented through explicit approval and continuation boundaries. Durable workflow checkpoint persistence and explicit resume are implemented behind the application-owned `WorkflowStateStore` boundary. Resume is caller-initiated, accepts only validated `RUNNING` checkpoints, and does not claim exactly-once executor side effects.
 
 Structural events are `RUN_STARTED`, `STEP_COMPLETED`, `STEP_SKIPPED`,
 `STEP_FAILED`, `RUN_COMPLETED`, and `RUN_FAILED`. They exclude input values,
@@ -806,3 +806,46 @@ Implemented capabilities must always be distinguishable from planned
 capabilities.
 
 Significant architectural decisions must be recorded through ADRs.
+
+### Deterministic Runtime Guardrail Foundation
+
+The application layer now includes a deterministic runtime-guardrail boundary
+covering `USER_INPUT`, `RETRIEVED_CONTEXT`, `TOOL_RESULT`, and `MODEL_OUTPUT`.
+
+`GuardrailService` owns stage coverage, content/finding bounds, deterministic
+rule execution, and fail-closed rule-contract validation. Retrieved evidence is
+evaluated in the exact final grounding order without rewriting evidence objects
+or changing citation provenance. `ControlledAgentService` evaluates user/tool
+context immediately before the model boundary and evaluates assistant content
+and string-valued tool-call arguments immediately after generation but before
+controlled tool execution.
+
+These checks do not replace authorization. Tool proposals still flow through
+`ToolExecutionService`, approval remains owned by `ApprovalService`, and
+continuation replay gates remain unchanged.
+
+### Guardrail Adversarial Evaluation and Observability
+
+`GuardrailAdversarialEvaluationService` executes versioned synthetic cases in
+stable order through an injected deterministic guardrail evaluator. Dataset
+identity, version, provenance, case uniqueness, returned content identity, and
+stage identity are validated. Results expose low-content per-case actions plus
+aggregate expected-block recall, expected-allow rate, action accuracy, missed
+blocks, and unexpected blocks. No LLM-as-a-judge scoring is used.
+
+The baseline adversarial dataset intentionally demonstrates a limitation of the
+literal-rule implementation: a paraphrased injection can remain allowed even
+when the evaluation expectation is `BLOCK`. This measured miss is preserved in
+the summary rather than converted into a successful result.
+
+`guardrail_observability` provides an allowlisted low-content projection from a
+`GuardrailEvaluation`. It exports only fixed structural dimensions and counts;
+it excludes content IDs, rule IDs, finding messages, match offsets, prompts,
+retrieved evidence, tool output, and model output.
+
+`GuardrailOpenTelemetryAdapter` is an OpenTelemetry API-only projection with an
+injected tracer. Like the workflow adapter, it configures no SDK, exporter,
+Collector, credentials, endpoint, transport, or telemetry backend. Guardrail
+observability is deliberately decoupled from enforcement so telemetry failure
+cannot manufacture tool authority, approval authority, retries, compensation,
+or execution decisions.

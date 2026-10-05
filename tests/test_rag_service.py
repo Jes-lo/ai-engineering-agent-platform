@@ -30,11 +30,25 @@ from ai_engineering_agent_platform.domain import (
     RerankedRetrievalResponse,
     RetrievalRequest,
 )
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailCategory,
+    GuardrailFinding,
+    GuardrailSeverity,
+    GuardrailStage,
+    GuardrailSubject,
+)
 from ai_engineering_agent_platform.services import (
     GroundedGenerationService,
     RAGService,
     RerankingService,
     RetrievalService,
+)
+from ai_engineering_agent_platform.services.guardrails import (
+    GuardrailLiteralPattern,
+    GuardrailPolicy,
+    GuardrailRule,
+    GuardrailService,
+    LiteralPatternGuardrailRule,
 )
 
 
@@ -352,11 +366,70 @@ def _retrieval_service(
     )
 
 
+class _RecordingGuardrailRule:
+    """Test rule recording exact evidence identities in evaluation order."""
+
+    def __init__(
+        self,
+        seen_content_ids: list[str],
+    ) -> None:
+        self._seen_content_ids = seen_content_ids
+
+    @property
+    def rule_id(self) -> str:
+        return "rag-recording-rule"
+
+    @property
+    def stages(self) -> tuple[GuardrailStage, ...]:
+        return (GuardrailStage.RETRIEVED_CONTEXT,)
+
+    def evaluate(
+        self,
+        subject: GuardrailSubject,
+    ) -> tuple[GuardrailFinding, ...]:
+        self._seen_content_ids.append(subject.content_id)
+        return ()
+
+
+def _rag_guardrail_service(
+    seen_content_ids: list[str] | None = None,
+) -> GuardrailService:
+    """Return deterministic retrieved-context policy for RAG tests."""
+    rule: GuardrailRule
+
+    if seen_content_ids is not None:
+        rule = _RecordingGuardrailRule(seen_content_ids)
+    else:
+        rule = LiteralPatternGuardrailRule(
+            rule_id="rag-test-retrieved-context-rule",
+            stages=(GuardrailStage.RETRIEVED_CONTEXT,),
+            patterns=(
+                GuardrailLiteralPattern(
+                    literal="__rag_guardrail_marker_not_present__",
+                    category=GuardrailCategory.OTHER,
+                    severity=GuardrailSeverity.LOW,
+                    message="configured synthetic RAG signal",
+                ),
+            ),
+        )
+
+    return GuardrailService(
+        policy=GuardrailPolicy(
+            enabled_stages=(GuardrailStage.RETRIEVED_CONTEXT,),
+            block_at_or_above=GuardrailSeverity.HIGH,
+            max_content_chars=10_000,
+            max_findings=16,
+        ),
+        rules=(rule,),
+    )
+
+
 def _generation_service(
     events: list[str],
     *,
     response: LLMResponse | None = None,
     error: Exception | None = None,
+    guardrail_seen_content_ids: list[str] | None = None,
 ) -> GroundedGenerationService:
     """Build real grounded generation over a synthetic LLM provider."""
     return GroundedGenerationService(
@@ -365,6 +438,7 @@ def _generation_service(
             response=response,
             error=error,
         ),
+        guardrail_service=_rag_guardrail_service(guardrail_seen_content_ids),
         model="generator-model",
         temperature=0.0,
         max_output_tokens=128,
@@ -679,4 +753,55 @@ def test_rag_service_and_result_are_publicly_exported() -> None:
     assert hasattr(
         services,
         "RAGService",
+    )
+
+
+@pytest.mark.anyio
+async def test_rag_guardrail_uses_final_reranked_grounding_order() -> None:
+    """Guardrail evaluation must follow the exact final grounding order."""
+    events: list[str] = []
+    guarded_content_ids: list[str] = []
+
+    service = RAGService(
+        _retrieval_service(
+            events,
+            vector_response=_vector_response(),
+        ),
+        _generation_service(
+            events,
+            response=_llm_response(),
+            guardrail_seen_content_ids=guarded_content_ids,
+        ),
+        reranking_service=_reranking_service(
+            events,
+            response=_rerank_response(),
+        ),
+    )
+
+    result = await service.run(_request())
+
+    assert events == [
+        "embed",
+        "vector_query",
+        "rerank",
+        "llm",
+    ]
+
+    assert guarded_content_ids == [
+        "chunk-b",
+        "chunk-a",
+    ]
+
+    assert isinstance(
+        result.grounding_input,
+        RerankedRetrievalResponse,
+    )
+
+    assert tuple(item.evidence.chunk_id for item in result.grounding_input.results) == (
+        "chunk-b",
+        "chunk-a",
+    )
+
+    assert result.answer.citations[0].evidence is (
+        result.grounding_input.results[0].evidence
     )

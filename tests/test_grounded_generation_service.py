@@ -21,8 +21,21 @@ from ai_engineering_agent_platform.domain import (
 from ai_engineering_agent_platform.domain.grounding import (
     GroundedAnswerStatus,
 )
+from ai_engineering_agent_platform.domain.guardrails import (
+    GuardrailCategory,
+    GuardrailSeverity,
+    GuardrailStage,
+)
 from ai_engineering_agent_platform.services.grounded_generation import (
+    GroundedGenerationGuardrailBlockedError,
     GroundedGenerationService,
+)
+from ai_engineering_agent_platform.services.guardrails import (
+    GuardrailLiteralPattern,
+    GuardrailPolicy,
+    GuardrailService,
+    GuardrailStageError,
+    LiteralPatternGuardrailRule,
 )
 
 
@@ -62,6 +75,37 @@ class SyntheticLLMProvider:
             raise AssertionError("synthetic LLM response not configured")
 
         return self.response
+
+
+def _guardrail_service(
+    *,
+    stages: tuple[GuardrailStage, ...] = (GuardrailStage.RETRIEVED_CONTEXT,),
+    literal: str = "__synthetic_guardrail_marker_not_present__",
+    severity: GuardrailSeverity = GuardrailSeverity.LOW,
+) -> GuardrailService:
+    """Return deterministic retrieved-context guardrail policy."""
+    return GuardrailService(
+        policy=GuardrailPolicy(
+            enabled_stages=stages,
+            block_at_or_above=GuardrailSeverity.HIGH,
+            max_content_chars=10_000,
+            max_findings=16,
+        ),
+        rules=(
+            LiteralPatternGuardrailRule(
+                rule_id="grounded-generation-test-rule",
+                stages=stages,
+                patterns=(
+                    GuardrailLiteralPattern(
+                        literal=literal,
+                        category=(GuardrailCategory.PROMPT_INJECTION_SIGNAL),
+                        severity=severity,
+                        message="configured synthetic guardrail signal",
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def _retrieval() -> RetrievalResponse:
@@ -117,6 +161,7 @@ async def test_service_generates_validated_grounded_answer() -> None:
 
     service = GroundedGenerationService(
         typed_provider,
+        guardrail_service=_guardrail_service(),
         model="generator-model",
         temperature=0.0,
         max_output_tokens=128,
@@ -153,6 +198,7 @@ async def test_provider_model_mismatch_fails_closed() -> None:
 
     service = GroundedGenerationService(
         provider,
+        guardrail_service=_guardrail_service(),
         model="generator-model",
     )
 
@@ -174,6 +220,7 @@ async def test_non_stop_finish_reason_fails_closed() -> None:
 
     service = GroundedGenerationService(
         provider,
+        guardrail_service=_guardrail_service(),
         model="generator-model",
     )
 
@@ -193,6 +240,7 @@ async def test_provider_failure_is_propagated() -> None:
 
     service = GroundedGenerationService(
         provider,
+        guardrail_service=_guardrail_service(),
         model="generator-model",
     )
 
@@ -212,6 +260,7 @@ async def test_empty_retrieval_bypasses_provider() -> None:
 
     service = GroundedGenerationService(
         provider,
+        guardrail_service=_guardrail_service(),
         model="generator-model",
     )
 
@@ -237,3 +286,82 @@ def test_grounded_generation_service_is_publicly_exported() -> None:
         "GroundedGenerationResult",
         "GroundedGenerationService",
     } <= set(services.__all__)
+
+
+@pytest.mark.anyio
+async def test_retrieved_context_guardrail_blocks_before_llm() -> None:
+    """Blocking retrieved evidence must never reach the LLM provider."""
+    marker = "synthetic grounded evidence"
+    provider = SyntheticLLMProvider(
+        response=_response(),
+    )
+
+    service = GroundedGenerationService(
+        provider,
+        guardrail_service=_guardrail_service(
+            literal=marker,
+            severity=GuardrailSeverity.HIGH,
+        ),
+        model="generator-model",
+    )
+
+    with pytest.raises(
+        GroundedGenerationGuardrailBlockedError,
+        match="blocked by deterministic guardrail policy",
+    ) as exc_info:
+        await service.generate(_retrieval())
+
+    assert provider.requests == []
+
+    error = exc_info.value
+
+    assert error.content_id == "chunk-1"
+    assert error.blocking_rule_ids == ("grounded-generation-test-rule",)
+
+    assert marker not in str(error)
+    assert marker not in repr(error)
+    assert marker not in error.content_id
+    assert all(marker not in rule_id for rule_id in error.blocking_rule_ids)
+
+
+@pytest.mark.anyio
+async def test_retrieved_context_stage_misconfiguration_fails_before_llm() -> None:
+    """Missing retrieved-context coverage must fail before LLM execution."""
+    provider = SyntheticLLMProvider(
+        response=_response(),
+    )
+
+    service = GroundedGenerationService(
+        provider,
+        guardrail_service=_guardrail_service(
+            stages=(GuardrailStage.USER_INPUT,),
+        ),
+        model="generator-model",
+    )
+
+    with pytest.raises(
+        GuardrailStageError,
+        match="retrieved_context",
+    ):
+        await service.generate(_retrieval())
+
+    assert provider.requests == []
+
+
+def test_grounded_generation_guardrail_errors_are_publicly_exported() -> None:
+    """Callers should be able to catch the public safety boundary errors."""
+    import ai_engineering_agent_platform.services as services
+
+    expected = {
+        "GroundedGenerationGuardrailBlockedError",
+        "GroundedGenerationGuardrailContractError",
+        "GroundedGenerationGuardrailError",
+    }
+
+    assert expected <= set(services.__all__)
+
+    for name in expected:
+        assert hasattr(
+            services,
+            name,
+        )

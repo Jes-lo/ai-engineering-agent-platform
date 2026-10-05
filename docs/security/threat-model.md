@@ -737,7 +737,7 @@ must enforce user or tenant authorization before retrieved evidence becomes
 model context.
 
 Presentation-layer citation rendering, semantic entailment/factual-correctness
-evaluation, and stronger prompt injection defenses remain future work.
+evaluation, and deterministic stage-aware guardrails now provide explicit fail-closed checks, while broader semantic and adaptive prompt-injection defenses remain future work.
 
 ## Current Knowledge Ingestion Security Posture
 
@@ -827,7 +827,7 @@ The current Ollama runtime does not implement:
 - model routing;
 - public model-generation API endpoints;
 - per-user or per-tenant model authorization;
-- AI-specific telemetry or model-operation tracing.
+- centralized AI observability backend or comprehensive model-operation tracing.
 
 The repository has PostgreSQL + pgvector persistence and a concrete
 vector-store provider supporting upsert, exact L2 nearest-neighbor query, and
@@ -924,7 +924,7 @@ equality/inequality only; and the engine has one executor call site.
 
 Workflow adapters reuse existing Tool, RAG, and bounded Agent services.
 Approval-required execution remains fail-closed. Automatic agent resume,
-automatic retry, rollback/compensation, parallel execution, and durable authenticated HITL are not implemented. Durable workflow checkpoints and explicit `RUNNING`-state resume are implemented behind `WorkflowStateStore`; checkpoint identity, inputs, progress, and structural events are validated fail-closed before resumed executor side effects. Resume does not guarantee exactly-once executor side effects across process loss.
+automatic retry, rollback/compensation, and parallel execution are not implemented. Durable authenticated HITL is implemented through explicit approval and continuation boundaries. Durable workflow checkpoints and explicit `RUNNING`-state resume are implemented behind `WorkflowStateStore`; checkpoint identity, inputs, progress, and structural events are validated fail-closed before resumed executor side effects. Resume does not guarantee exactly-once executor side effects across process loss.
 
 A failed workflow can leave earlier side effects and must not be interpreted as
 transactional rollback.
@@ -933,3 +933,53 @@ Workflow telemetry is intentionally low-content and excludes input values,
 prompts, tool arguments, RAG content, outputs, and exception text. The
 OpenTelemetry integration is an API-only terminal projection with an injected
 tracer; no SDK, OTLP exporter, Collector, or telemetry backend is configured.
+
+## Current Deterministic Runtime Guardrail Security Posture
+
+Deterministic runtime guardrails are now an active application control at four
+untrusted-content boundaries:
+
+- user input before LLM execution;
+- retrieved context before grounded request assembly;
+- controlled tool results before reuse as model context;
+- model output before interpretation or tool execution, including textual
+  model-generated tool arguments.
+
+The controls fail closed on unsupported stages, bounded-input violations,
+deterministic rule execution failures, invalid rule output, foreign rule
+identity, invalid finding offsets, and excessive finding counts. Blocking
+exceptions retain structural metadata only and do not retain raw subject
+content or finding messages.
+
+The guardrail boundary does not authenticate humans, approve tools, grant
+permissions, bypass replay gates, retry operations, or compensate prior side
+effects. `ToolExecutionService` remains the final tool-execution authority and
+`ApprovalService` remains the human-approval authority. A tool side effect that
+already completed is not automatically rolled back if its returned content is
+later blocked before the next model turn.
+
+Adversarial evaluation is deterministic and versioned. The current repository
+baseline contains direct literal-pattern attacks across every guardrail stage,
+benign controls, and a paraphrased prompt-injection case expected to be blocked
+but missed by the literal rule. The resulting recall below 1.0 is an explicit
+residual-risk signal, not a test failure and not evidence that the paraphrase is
+safe.
+
+Guardrail telemetry follows strict data minimization. The projection excludes
+content identifiers, configured rule identifiers, finding messages, match
+offsets, prompts, retrieved evidence, tool results, and model output. Only
+fixed structural dimensions, counts, categories, action, and maximum severity
+are exportable. The OpenTelemetry integration is API-only and configures no
+SDK, exporter, Collector, credentials, endpoint, transport, or backend.
+
+Residual limitations remain explicit:
+
+- literal-pattern rules do not provide semantic or adaptive injection
+  detection;
+- novel wording, encoding, multilingual variants, or context-dependent attacks
+  can evade deterministic literals;
+- guardrail evaluation does not prove model correctness or factuality;
+- telemetry is not an authorization or safety decision source;
+- no claim is made that prompt injection is eliminated;
+- centralized AI observability and comprehensive model-operation tracing remain
+  future work.

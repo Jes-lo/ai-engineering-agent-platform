@@ -2,6 +2,9 @@
 
 from ai_engineering_agent_platform.services.agent import (
     MAX_AGENT_TURN_STEPS,
+    AgentGuardrailBlockedError,
+    AgentGuardrailContractError,
+    AgentGuardrailError,
     AgentOrchestrationError,
     AgentPlannedToolCall,
     AgentResponseError,
@@ -34,6 +37,9 @@ from ai_engineering_agent_platform.services.evaluation_mapping import (
     summarize_rag_metrics,
 )
 from ai_engineering_agent_platform.services.grounded_generation import (
+    GroundedGenerationGuardrailBlockedError,
+    GroundedGenerationGuardrailContractError,
+    GroundedGenerationGuardrailError,
     GroundedGenerationResult,
     GroundedGenerationService,
 )
@@ -109,6 +115,9 @@ __all__ = [
     "MAX_AGENT_LOOP_MODEL_TURNS",
     "MAX_AGENT_LOOP_TOOL_CALLS",
     "MAX_AGENT_TURN_STEPS",
+    "AgentGuardrailBlockedError",
+    "AgentGuardrailContractError",
+    "AgentGuardrailError",
     "AgentLoopBudgetError",
     "AgentLoopError",
     "AgentLoopRequest",
@@ -127,6 +136,9 @@ __all__ = [
     "ControlledAgentService",
     "ControlledToolExecutionResult",
     "DocumentChunker",
+    "GroundedGenerationGuardrailBlockedError",
+    "GroundedGenerationGuardrailContractError",
+    "GroundedGenerationGuardrailError",
     "GroundedGenerationResult",
     "GroundedGenerationService",
     "IndexingResult",
