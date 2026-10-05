@@ -36,8 +36,11 @@ The current repository implements foundational platform layers, concrete LLM
 and embedding runtime integrations through Ollama, PostgreSQL + pgvector
 persistence, bounded caller-supplied text ingestion, provider-neutral indexing,
 semantic retrieval, optional reranking, grounded generation, end-to-end RAG
-orchestration, controlled tool execution, bounded agent-turn orchestration, and
-a bounded conversational agent loop with typed tool-result history.
+orchestration, controlled tool execution, bounded agent-turn orchestration, a
+bounded conversational agent loop with typed tool-result history, authenticated
+inbound MCP tool exposure, project-owned workflow execution with durable
+checkpoint/resume and authenticated HITL, durable agent continuations, and
+deterministic stage-aware runtime guardrails.
 
 Implemented capabilities currently include:
 
@@ -118,7 +121,12 @@ boundary rather than spread throughout application code.
 
 There is currently no public model-generation, embedding, or retrieval API
 endpoint, streaming model generation, concrete reranker adapter,
-durable/distributed conversational-agent runtime, outbound remote MCP wire transport, MCP stdio/resources/prompts, production identity-provider integration, workflow runtime, or AI observability backend.
+durable/distributed conversational-agent runtime, outbound remote MCP wire
+transport, MCP stdio/resources/prompts, production identity-provider
+integration, centralized AI observability backend, or Developer Console.
+Project-owned workflow execution, durable workflow checkpoints/resume, durable
+approval state, durable agent continuations, and deterministic runtime
+guardrails are implemented.
 
 PostgreSQL + pgvector persistence, deterministic chunking, indexing,
 semantic retrieval, provider-neutral optional reranking, deterministic context
@@ -529,10 +537,12 @@ required approval, declared arguments, and portable scalar argument types.
 Arguments are not coerced. After provider execution, result `call_id` and
 `tool_name` identities must match the exact invocation.
 
-The current approval grant is deliberately structural: it binds exact
-`call_id` and `tool_name` values but does not yet represent authenticated
-human identity, persistence, signatures, expiry, revocation, or single-use
-consumption.
+The low-level approval grant remains deliberately structural: it binds exact
+`call_id` and `tool_name` values and is not itself a human-identity object.
+Authenticated durable approval is implemented separately through `ApprovalService`
+and persisted `approval_requests`; that control plane owns trusted actor context,
+request lifecycle, expiry, and consumption before execution receives structural
+approval evidence.
 
 The controlled execution service itself remains model-agnostic.
 `ToolExecutionService.validate()` provides the deterministic registration,
@@ -540,8 +550,11 @@ enabled-policy, allowlist, approval, and argument checks used by `execute()`
 without calling the provider. `ControlledAgentService` composes that boundary
 with untrusted `LLMToolCall` proposals, and `BoundedAgentLoopService` composes
 multiple controlled turns plus validated tool-result history without granting
-the model new execution authority. Durable/distributed agent state,
-authenticated HITL approval, outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, external workflow-engine integration, shell tools, filesystem tools, and network tools remain future capabilities.
+the model new execution authority. Durable/distributed agent execution beyond the implemented persisted
+continuation foundation, outbound remote MCP wire transport, stdio, MCP
+resources/prompts, production identity-provider integration, external
+workflow-engine integration, shell tools, filesystem tools, and network tools
+remain future capabilities.
 
 ### MCP
 
@@ -668,26 +681,28 @@ Current and planned evaluation areas include:
 
 ### Guardrails
 
-Guardrails may operate before, during, and after AI execution.
+Deterministic runtime guardrails are active at the user-input, retrieved-context,
+tool-result, and model-output boundaries. They fail closed on invalid stages,
+bounded-input violations, rule failures, malformed findings, and invalid rule
+identity or offsets.
 
-They are expected to include a combination of:
-
-- validation;
-- authorization;
-- policy checks;
-- content constraints;
-- execution limits;
-- tool restrictions;
-- human approval.
+Authorization, tool policy, and authenticated human approval remain separate
+authority boundaries rather than model decisions. The current literal-pattern
+guardrail foundation is intentionally deterministic and bounded; it is not
+semantic or adaptive prompt-injection detection.
 
 Guardrails must not rely exclusively on asking the same model to judge
 its own behavior.
 
 ### Observability
 
-Operational and AI observability will be related but distinct.
+Operational and AI observability are related but distinct. The repository
+currently provides low-content workflow and guardrail projections through
+injected OpenTelemetry API adapters. It does not configure an OpenTelemetry
+SDK, OTLP exporter, Collector, centralized telemetry backend, or comprehensive
+model-operation tracing.
 
-Operational observability will focus on:
+Broader operational observability will focus on:
 
 - availability;
 - latency;
@@ -696,7 +711,7 @@ Operational observability will focus on:
 - saturation;
 - infrastructure health.
 
-AI observability will eventually include:
+Broader AI observability may eventually include:
 
 - model operations;
 - retrieval operations;
@@ -711,10 +726,11 @@ information must not be indiscriminately exported to telemetry systems.
 
 ## Data Architecture
 
-PostgreSQL is the current persistence technology for the implemented vector
-foundation. pgvector provides the vector column type and exact distance
-operations while a provider-neutral application boundary keeps PostgreSQL
-details out of the vector-store contract.
+PostgreSQL is the current persistence technology for vector data and selected
+durable control-plane state. pgvector provides the vector column type and exact
+distance operations while provider-neutral application boundaries keep
+PostgreSQL details out of vector, workflow, approval, and continuation
+contracts.
 
 The implemented persistence schema currently contains:
 
@@ -726,7 +742,10 @@ The implemented persistence schema currently contains:
 - arbitrary non-empty text record identifiers;
 - pgvector embeddings;
 - optional record text;
-- ordered metadata represented as a JSONB array.
+- ordered metadata represented as a JSONB array;
+- durable workflow checkpoint records;
+- durable authenticated approval-request records;
+- durable active/consumed agent-continuation records.
 
 `namespace` and `space_id` intentionally represent different concerns.
 `namespace` partitions application data; `space_id` identifies the vector
@@ -744,8 +763,11 @@ A caller may use a stronger `space_id` containing revision or artifact
 identity, but the current implementation does not itself resolve, verify, or
 pin model revisions or digests.
 
-The implementation deliberately does not yet contain document, chunk,
-knowledge-source, agent, workflow, evaluation, or audit schemas.
+The persistence schema does not yet contain document/chunk/knowledge-source
+catalogs, agent or workflow definitions, evaluation datasets/results, model
+metadata, tool registrations, or general audit records. Durable workflow
+checkpoints, approval requests, and agent continuations are persisted separately
+as control-plane state.
 
 Future persistent data categories may include:
 

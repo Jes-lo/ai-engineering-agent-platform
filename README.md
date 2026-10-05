@@ -6,7 +6,9 @@ platform engineering practices.
 
 ## Status
 
-Early development.
+Portfolio release baseline complete for the current scoped implementation.
+
+The repository remains intentionally incremental. Capabilities under `Planned Capabilities` are future work and should not be interpreted as implemented or production-ready.
 
 The repository currently includes:
 
@@ -75,6 +77,12 @@ The repository currently includes:
 - controlled no-evidence abstention without reranker or LLM execution;
 - preservation of the original retrieval result and the exact grounding input
   used for generation through `RAGResult`;
+- project-owned workflow execution with durable PostgreSQL checkpoints,
+  explicit resume, durable authenticated approval state, and durable agent
+  continuations;
+- deterministic fail-closed runtime guardrails across user input, retrieved
+  context, tool results, and model output, with adversarial evaluation and
+  low-content OpenTelemetry API projections;
 - automated architectural dependency checks;
 - CI/CD and software supply-chain validation, including a dedicated
   PostgreSQL integration job.
@@ -110,9 +118,12 @@ coverage for every registered tool. `ToolExecutionService` then enforces:
 - exact result-to-invocation identity validation;
 - provider failure propagation without implicit retries.
 
-The current `ToolApprovalGrant` is structural approval evidence only. It is
-not yet an identity-bound, persistent, signed, expiring, or single-use
-human-in-the-loop approval system.
+`ToolApprovalGrant` remains structural approval evidence at the execution
+boundary rather than a human-identity object. Durable authenticated HITL is
+implemented separately through `ApprovalService` and persisted approval-request
+state; successful approval yields structurally bound evidence that
+`ToolExecutionService` validates without transferring approval authority to the
+model or provider adapter.
 
 The provider adapter still produces inert `LLMToolCall` values and never
 executes tools by itself. A separate `ControlledAgentService` may now expose
@@ -125,10 +136,10 @@ authority.
 Before the first provider side effect, every planned invocation is checked
 through the side-effect-free `ToolExecutionService.validate()` boundary. A
 missing structural approval produces an `APPROVAL_REQUIRED` result instead of
-executing the batch. `resume()` accepts only an active continuation previously
-issued by the same service instance and consumes that continuation before
-provider execution, providing in-memory replay protection without re-running
-the LLM decision.
+executing the batch. Resume accepts only a validated active continuation bound
+to the frozen plan. Project-owned persistence can retain active and consumed
+continuation state across process loss, while replay and identity checks occur
+before resumed provider execution without re-running the LLM decision.
 
 The platform now also provides a bounded conversational agent loop through
 `BoundedAgentLoopService`. The loop composes `ControlledAgentService` rather
@@ -149,16 +160,19 @@ The conversational loop has independent global ceilings of
 `MAX_AGENT_LOOP_MODEL_TURNS = 8` and `MAX_AGENT_LOOP_TOOL_CALLS = 8`.
 Tool-call consumption accumulates across model turns instead of resetting on
 each turn. Approval-required execution can pause and resume the exact frozen
-decision without model regeneration, while the existing process-local replay
-protections remain in force.
+decision without model regeneration. Active and consumed turn/loop
+continuations can be persisted through the project-owned continuation store,
+with replay and identity validation remaining fail-closed before resumed
+provider execution.
 
-The current loop is intentionally not durable or distributed. Pending
-continuations remain in memory and are lost on process restart. Tool batches
-remain sequential and non-transactional, with no rollback of earlier side
-effects and no automatic retry after execution begins. Authenticated HITL
-lifecycle, MCP wire transports and authenticated connection lifecycle,
-workflows, shell tools, filesystem tools, and network tools remain
-outside the bounded-agent feature.
+The bounded loop remains sequential, non-transactional, and non-distributed.
+Durable continuation persistence does not provide exactly-once external side
+effects: earlier successful side effects are not rolled back if a later
+execution fails, and automatic retry after execution begins remains absent.
+Authenticated HITL is owned by the separate approval control plane, and
+workflow orchestration is owned by the separate workflow service boundary. MCP
+wire transports plus shell/filesystem/network tools remain outside the
+bounded-agent service itself.
 
 Persistent vector storage is now complemented by provider-neutral retrieval,
 grounded generation, and end-to-end RAG orchestration. Deterministic chunking,
@@ -195,13 +209,17 @@ injection content.
 
 The repository now implements bounded caller-supplied text ingestion,
 controlled tool execution, inert LLM tool-call proposals, bounded single-turn
-agent orchestration, typed tool-result conversation history, and a bounded
-multi-turn conversational agent loop. It still does not implement filesystem or
-network source loaders, PDF/DOCX/HTML parsing, document replacement/reindex
-lifecycle orchestration, a public retrieval API, a concrete reranker adapter,
-tenant-aware retrieval authorization, presentation-layer citation rendering,
-semantic groundedness evaluation, outbound remote MCP wire transport, MCP stdio/resources/prompts, production identity-provider integration, workflow execution,
-authenticated durable HITL state, or AI observability backends.
+agent orchestration, typed tool-result conversation history, a bounded
+multi-turn conversational agent loop, project-owned workflow execution with
+durable checkpoints/resume, durable authenticated HITL, durable agent
+continuations, and deterministic stage-aware runtime guardrails. It still does
+not implement filesystem or network source loaders, PDF/DOCX/HTML parsing,
+document replacement/reindex lifecycle orchestration, a public retrieval API,
+a concrete reranker adapter, tenant-aware retrieval authorization,
+presentation-layer citation rendering, semantic groundedness evaluation,
+outbound remote MCP wire transport, MCP stdio/resources/prompts,
+production identity-provider integration, durable/distributed agent execution,
+or centralized AI observability backends.
 
 ## MCP Interoperability Foundation
 
@@ -292,10 +310,11 @@ The OpenTelemetry integration is an API-level terminal trace projection only.
 It does not configure the OpenTelemetry SDK, OTLP exporters, a Collector, a
 telemetry backend, or execution-duration measurement.
 
-Current limitations are explicit: workflow execution is process-local and
-sequential, with no durable persistence/resume, durable authenticated HITL,
-automatic retry, rollback, parallel scheduling, or arbitrary expression
-language.
+Current limitations are explicit: workflow execution remains caller-driven and
+sequential. Durable checkpoint persistence/resume and authenticated HITL are
+implemented, but there is no automatic retry, rollback, parallel scheduling,
+arbitrary expression language, or exactly-once guarantee for external side
+effects across process loss.
 
 ## Planned Capabilities
 
@@ -316,11 +335,11 @@ including:
 - cross-process agent state, durable replay protection, and resumable
   continuation recovery;
 - outbound remote MCP wire-client support, stdio transport, MCP resources/prompts, and production identity-provider integration;
-- human-in-the-loop approval;
-- guardrails;
+- broader semantic/adaptive guardrails and policy coverage beyond the current
+  deterministic literal-pattern foundation;
 - richer external evaluation datasets, semantic entailment/factual correctness evaluators, and optional judge-based evaluation;
 - AI and application observability;
-- OpenTelemetry;
+- centralized OpenTelemetry SDK/exporter/Collector/backend integration;
 - metrics and dashboards;
 - an AI Developer Console.
 

@@ -879,12 +879,16 @@ The current retrieval foundation does not yet implement:
 - adversarial retrieval evaluations;
 - durable/distributed conversational agent runtime;
 - outbound remote MCP wire transport, stdio, MCP resources/prompts, production identity-provider integration, and transport rate controls;
-- workflow runtime.
 
 Bounded caller-supplied text ingestion, retrieval, provider-neutral
 reranking, grounded generation, and end-to-end RAG orchestration are active
 application surfaces rather than purely anticipatory surfaces.
-Filesystem/network source acquisition, richer document parsing, public retrieval exposure, tenant authorization, durable/distributed agent runtime, outbound remote MCP wire transport, MCP stdio/resources/prompts, production identity-provider integration, workflows, and AI observability remain partially or wholly anticipatory and require additional executable controls when introduced.
+Filesystem/network source acquisition, richer document parsing, public retrieval
+exposure, tenant authorization, durable/distributed agent execution beyond the
+implemented persisted continuation foundation, outbound remote MCP wire
+transport, MCP stdio/resources/prompts, production identity-provider
+integration, and centralized AI observability remain partially or wholly
+anticipatory and require additional executable controls when introduced.
 
 Each future feature must update this threat model when it materially
 changes:
