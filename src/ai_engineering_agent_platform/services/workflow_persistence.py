@@ -7,6 +7,7 @@ from math import isfinite
 from typing import Protocol, cast
 
 from ai_engineering_agent_platform.domain.workflow import (
+    WorkflowApprovalPause,
     WorkflowEventType,
     WorkflowExecutionEvent,
     WorkflowInput,
@@ -17,7 +18,8 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowStepStatus,
 )
 
-WORKFLOW_CHECKPOINT_FORMAT_VERSION = 1
+WORKFLOW_CHECKPOINT_FORMAT_VERSION = 2
+SUPPORTED_WORKFLOW_CHECKPOINT_FORMAT_VERSIONS = frozenset({1, 2})
 MAX_WORKFLOW_CHECKPOINT_BYTES = 1_048_576
 MAX_DURABLE_VALUE_DEPTH = 12
 MAX_DURABLE_COLLECTION_ITEMS = 256
@@ -119,6 +121,26 @@ class WorkflowCheckpoint:
         if self.state.status is WorkflowRunStatus.RUNNING:
             if terminal_positions:
                 raise ValueError("running checkpoint must not contain terminal event")
+
+            return
+
+        if self.state.status is WorkflowRunStatus.AWAITING_APPROVAL:
+            if terminal_positions:
+                raise ValueError(
+                    "awaiting-approval checkpoint must not contain terminal event"
+                )
+
+            paused_step = self.state.steps[-1]
+            final_event = self.events[-1]
+
+            if (
+                final_event.event_type is not WorkflowEventType.STEP_AWAITING_APPROVAL
+                or final_event.step_id != paused_step.step_id
+                or final_event.executor_name != paused_step.executor_name
+            ):
+                raise ValueError(
+                    "awaiting-approval checkpoint must end with matching pause event"
+                )
 
             return
 
@@ -500,17 +522,66 @@ class WorkflowCheckpointCodec:
     def dumps(
         self,
         checkpoint: WorkflowCheckpoint,
+        *,
+        format_version: int = WORKFLOW_CHECKPOINT_FORMAT_VERSION,
     ) -> str:
         """Serialize one validated checkpoint into canonical JSON."""
-        if not isinstance(
-            checkpoint,
-            WorkflowCheckpoint,
-        ):
+        if not isinstance(checkpoint, WorkflowCheckpoint):
             raise WorkflowSerializationError("checkpoint must be WorkflowCheckpoint")
+
+        if (
+            type(format_version) is not int
+            or format_version not in SUPPORTED_WORKFLOW_CHECKPOINT_FORMAT_VERSIONS
+        ):
+            raise WorkflowSerializationError("unsupported checkpoint format version")
 
         state = checkpoint.state
 
-        payload = {
+        if format_version == 1 and (
+            state.status is WorkflowRunStatus.AWAITING_APPROVAL
+            or any(
+                step.status is WorkflowStepStatus.AWAITING_APPROVAL
+                or step.approval_pause is not None
+                for step in state.steps
+            )
+            or any(
+                event.event_type is WorkflowEventType.STEP_AWAITING_APPROVAL
+                for event in checkpoint.events
+            )
+        ):
+            raise WorkflowSerializationError(
+                "checkpoint format 1 cannot encode approval pause state"
+            )
+
+        encoded_steps: list[dict[str, object]] = []
+
+        for step in state.steps:
+            encoded_step: dict[str, object] = {
+                "execution": (
+                    None
+                    if step.execution is None
+                    else {"output": _encode_value(step.execution.output)}
+                ),
+                "executor_name": step.executor_name,
+                "status": step.status.value,
+                "step_id": step.step_id,
+            }
+
+            if format_version == 2:
+                encoded_step["approval_pause"] = (
+                    None
+                    if step.approval_pause is None
+                    else {
+                        "approval_ids": list(step.approval_pause.approval_ids),
+                        "continuation_identity": list(
+                            step.approval_pause.continuation_identity
+                        ),
+                    }
+                )
+
+            encoded_steps.append(encoded_step)
+
+        document: dict[str, object] = {
             "events": [
                 {
                     "event_type": event.event_type.value,
@@ -523,7 +594,7 @@ class WorkflowCheckpointCodec:
                 }
                 for event in checkpoint.events
             ],
-            "format": WORKFLOW_CHECKPOINT_FORMAT_VERSION,
+            "format": format_version,
             "state": {
                 "inputs": [
                     {
@@ -534,21 +605,7 @@ class WorkflowCheckpointCodec:
                 ],
                 "run_id": state.run_id,
                 "status": state.status.value,
-                "steps": [
-                    {
-                        "execution": (
-                            None
-                            if step.execution is None
-                            else {
-                                "output": _encode_value(step.execution.output),
-                            }
-                        ),
-                        "executor_name": step.executor_name,
-                        "status": step.status.value,
-                        "step_id": step.step_id,
-                    }
-                    for step in state.steps
-                ],
+                "steps": encoded_steps,
                 "workflow_id": state.workflow_id,
                 "workflow_version": state.workflow_version,
             },
@@ -556,19 +613,13 @@ class WorkflowCheckpointCodec:
 
         try:
             encoded = json.dumps(
-                payload,
-                allow_nan=False,
+                document,
                 ensure_ascii=False,
-                separators=(
-                    ",",
-                    ":",
-                ),
+                allow_nan=False,
                 sort_keys=True,
+                separators=(",", ":"),
             )
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
+        except (TypeError, ValueError) as exc:
             raise WorkflowSerializationError("checkpoint JSON encoding failed") from exc
 
         if len(encoded.encode("utf-8")) > MAX_WORKFLOW_CHECKPOINT_BYTES:
@@ -581,38 +632,37 @@ class WorkflowCheckpointCodec:
         payload: str,
     ) -> WorkflowCheckpoint:
         """Decode one checkpoint and revalidate all domain invariants."""
-        if not isinstance(
-            payload,
-            str,
-        ):
+        if not isinstance(payload, str):
             raise WorkflowSerializationError("checkpoint payload must be a string")
 
         if len(payload.encode("utf-8")) > MAX_WORKFLOW_CHECKPOINT_BYTES:
             raise WorkflowSerializationError("checkpoint exceeds maximum encoded size")
 
         try:
-            root = json.loads(
+            raw = json.loads(
                 payload,
-                object_pairs_hook=(_reject_duplicate_keys),
+                object_pairs_hook=_reject_duplicate_keys,
             )
         except WorkflowSerializationError:
             raise
-        except json.JSONDecodeError as exc:
+        except (
+            json.JSONDecodeError,
+            UnicodeError,
+            ValueError,
+        ) as exc:
             raise WorkflowSerializationError("checkpoint is not valid JSON") from exc
 
         root_data = _require_exact_keys(
-            root,
-            keys={
-                "events",
-                "format",
-                "state",
-            },
+            raw,
+            keys={"events", "format", "state"},
             label="checkpoint",
         )
 
+        format_version = root_data["format"]
+
         if (
-            type(root_data["format"]) is not int
-            or root_data["format"] != WORKFLOW_CHECKPOINT_FORMAT_VERSION
+            type(format_version) is not int
+            or format_version not in SUPPORTED_WORKFLOW_CHECKPOINT_FORMAT_VERSIONS
         ):
             raise WorkflowSerializationError("unsupported checkpoint format version")
 
@@ -633,23 +683,40 @@ class WorkflowCheckpointCodec:
         raw_steps = state_data["steps"]
         raw_events = root_data["events"]
 
-        if not isinstance(
-            raw_inputs,
-            list,
-        ):
+        if not isinstance(raw_inputs, list):
             raise WorkflowSerializationError("checkpoint inputs must be a list")
 
-        if not isinstance(
-            raw_steps,
-            list,
-        ):
+        if not isinstance(raw_steps, list):
             raise WorkflowSerializationError("checkpoint steps must be a list")
 
-        if not isinstance(
-            raw_events,
-            list,
-        ):
+        if not isinstance(raw_events, list):
             raise WorkflowSerializationError("checkpoint events must be a list")
+
+        if format_version == 1:
+            if state_data["status"] == WorkflowRunStatus.AWAITING_APPROVAL.value:
+                raise WorkflowSerializationError(
+                    "checkpoint format 1 cannot encode approval pause state"
+                )
+
+            for raw_step in raw_steps:
+                if (
+                    isinstance(raw_step, dict)
+                    and raw_step.get("status")
+                    == WorkflowStepStatus.AWAITING_APPROVAL.value
+                ):
+                    raise WorkflowSerializationError(
+                        "checkpoint format 1 cannot encode approval pause state"
+                    )
+
+            for raw_event in raw_events:
+                if (
+                    isinstance(raw_event, dict)
+                    and raw_event.get("event_type")
+                    == WorkflowEventType.STEP_AWAITING_APPROVAL.value
+                ):
+                    raise WorkflowSerializationError(
+                        "checkpoint format 1 cannot encode approval pause state"
+                    )
 
         try:
             inputs = tuple(
@@ -664,10 +731,7 @@ class WorkflowCheckpointCodec:
                 for input_data in (
                     _require_exact_keys(
                         raw_input,
-                        keys={
-                            "name",
-                            "value",
-                        },
+                        keys={"name", "value"},
                         label="checkpoint input",
                     ),
                 )
@@ -676,65 +740,158 @@ class WorkflowCheckpointCodec:
             steps: list[WorkflowStepState] = []
 
             for raw_step in raw_steps:
+                keys = {
+                    "execution",
+                    "executor_name",
+                    "status",
+                    "step_id",
+                }
+
+                if format_version == 2:
+                    keys.add("approval_pause")
+
                 step_data = _require_exact_keys(
                     raw_step,
-                    keys={
-                        "execution",
-                        "executor_name",
-                        "status",
-                        "step_id",
-                    },
+                    keys=keys,
                     label="checkpoint step",
                 )
 
-                status = WorkflowStepStatus(cast(str, step_data["status"]))
-
-                raw_execution = step_data["execution"]
-
                 execution = None
+                raw_execution = step_data["execution"]
 
                 if raw_execution is not None:
                     execution_data = _require_exact_keys(
                         raw_execution,
-                        keys={
-                            "output",
-                        },
+                        keys={"output"},
                         label="checkpoint execution",
                     )
 
                     execution = WorkflowStepExecution(
-                        step_id=cast(str, step_data["step_id"]),
-                        executor_name=cast(str, step_data["executor_name"]),
+                        step_id=cast(
+                            str,
+                            step_data["step_id"],
+                        ),
+                        executor_name=cast(
+                            str,
+                            step_data["executor_name"],
+                        ),
                         output=_decode_value(execution_data["output"]),
                     )
 
+                approval_pause = None
+
+                if format_version == 2:
+                    raw_pause = step_data["approval_pause"]
+
+                    if raw_pause is not None:
+                        pause_data = _require_exact_keys(
+                            raw_pause,
+                            keys={
+                                "approval_ids",
+                                "continuation_identity",
+                            },
+                            label="checkpoint approval pause",
+                        )
+
+                        raw_ids = pause_data["approval_ids"]
+                        raw_identity = pause_data["continuation_identity"]
+
+                        if not isinstance(raw_ids, list):
+                            raise WorkflowSerializationError(
+                                "checkpoint approval IDs must be a list"
+                            )
+
+                        if not isinstance(
+                            raw_identity,
+                            list,
+                        ):
+                            raise WorkflowSerializationError(
+                                "checkpoint continuation identity must be a list"
+                            )
+
+                        approval_pause = WorkflowApprovalPause(
+                            continuation_identity=tuple(
+                                cast(str, item) for item in raw_identity
+                            ),
+                            approval_ids=tuple(cast(str, item) for item in raw_ids),
+                        )
+
                 steps.append(
                     WorkflowStepState(
-                        step_id=cast(str, step_data["step_id"]),
-                        executor_name=cast(str, step_data["executor_name"]),
-                        status=status,
+                        step_id=cast(
+                            str,
+                            step_data["step_id"],
+                        ),
+                        executor_name=cast(
+                            str,
+                            step_data["executor_name"],
+                        ),
+                        status=WorkflowStepStatus(
+                            cast(
+                                str,
+                                step_data["status"],
+                            )
+                        ),
                         execution=execution,
+                        approval_pause=approval_pause,
                     )
                 )
 
             state = WorkflowRunState(
-                run_id=cast(str, state_data["run_id"]),
-                workflow_id=cast(str, state_data["workflow_id"]),
-                workflow_version=cast(str, state_data["workflow_version"]),
-                status=WorkflowRunStatus(cast(str, state_data["status"])),
+                run_id=cast(
+                    str,
+                    state_data["run_id"],
+                ),
+                workflow_id=cast(
+                    str,
+                    state_data["workflow_id"],
+                ),
+                workflow_version=cast(
+                    str,
+                    state_data["workflow_version"],
+                ),
+                status=WorkflowRunStatus(
+                    cast(
+                        str,
+                        state_data["status"],
+                    )
+                ),
                 inputs=inputs,
                 steps=tuple(steps),
             )
 
             events = tuple(
                 WorkflowExecutionEvent(
-                    sequence=cast(int, event_data["sequence"]),
-                    run_id=cast(str, event_data["run_id"]),
-                    workflow_id=cast(str, event_data["workflow_id"]),
-                    workflow_version=cast(str, event_data["workflow_version"]),
-                    event_type=WorkflowEventType(cast(str, event_data["event_type"])),
-                    step_id=cast(str | None, event_data["step_id"]),
-                    executor_name=cast(str | None, event_data["executor_name"]),
+                    sequence=cast(
+                        int,
+                        event_data["sequence"],
+                    ),
+                    run_id=cast(
+                        str,
+                        event_data["run_id"],
+                    ),
+                    workflow_id=cast(
+                        str,
+                        event_data["workflow_id"],
+                    ),
+                    workflow_version=cast(
+                        str,
+                        event_data["workflow_version"],
+                    ),
+                    event_type=WorkflowEventType(
+                        cast(
+                            str,
+                            event_data["event_type"],
+                        )
+                    ),
+                    step_id=cast(
+                        str | None,
+                        event_data["step_id"],
+                    ),
+                    executor_name=cast(
+                        str | None,
+                        event_data["executor_name"],
+                    ),
                 )
                 for raw_event in raw_events
                 for event_data in (
@@ -758,8 +915,10 @@ class WorkflowCheckpointCodec:
                 state=state,
                 events=events,
             )
+
         except WorkflowSerializationError:
             raise
+
         except (
             KeyError,
             TypeError,

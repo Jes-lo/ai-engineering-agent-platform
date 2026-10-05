@@ -14,6 +14,7 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowInput,
     WorkflowInputDefinition,
     WorkflowInputType,
+    WorkflowRunResult,
     WorkflowRunStatus,
     WorkflowStepDefinition,
 )
@@ -125,6 +126,7 @@ async def test_completed_run_emits_ordered_structural_events() -> None:
             ),
         ),
     )
+    assert isinstance(result, WorkflowRunResult)
 
     assert result.trace is not None
 
@@ -265,6 +267,7 @@ async def test_safe_event_attributes_are_strictly_allowlisted() -> None:
     )
 
     result = await _engine(executor).run(definition)
+    assert isinstance(result, WorkflowRunResult)
 
     assert result.trace is not None
 
@@ -336,6 +339,7 @@ async def test_completed_observability_summary_uses_only_state_counts() -> None:
             ),
         ),
     )
+    assert isinstance(result, WorkflowRunResult)
 
     assert result.state is not None
     assert result.trace is not None

@@ -20,6 +20,7 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowStepStatus,
 )
 from ai_engineering_agent_platform.services.workflow_persistence import (
+    WORKFLOW_CHECKPOINT_FORMAT_VERSION,
     WorkflowCheckpoint,
     WorkflowCheckpointCodec,
     WorkflowPersistenceConflictError,
@@ -209,7 +210,7 @@ def _stored_row(
         checkpoint.state.workflow_id,
         checkpoint.state.workflow_version,
         checkpoint.state.status.value,
-        1,
+        WORKFLOW_CHECKPOINT_FORMAT_VERSION,
         len(checkpoint.events),
         payload,
         sha256(payload.encode("utf-8")).hexdigest(),
@@ -432,3 +433,34 @@ async def test_invalid_run_id_fails_before_database_access() -> None:
         await _store(connection).load("bad run id")
 
     assert connection.calls == []
+
+
+@pytest.mark.anyio
+async def test_load_reconstructs_legacy_v1_checkpoint() -> None:
+    """A stored Feature-18 format-v1 row remains readable after v2."""
+    checkpoint = _completed_checkpoint()
+
+    payload = WorkflowCheckpointCodec().dumps(
+        checkpoint,
+        format_version=1,
+    )
+
+    row = (
+        checkpoint.state.workflow_id,
+        checkpoint.state.workflow_version,
+        checkpoint.state.status.value,
+        1,
+        len(checkpoint.events),
+        payload,
+        sha256(payload.encode("utf-8")).hexdigest(),
+    )
+
+    connection = FakeConnection(
+        [
+            row,
+        ]
+    )
+
+    restored = await _store(connection).load(checkpoint.state.run_id)
+
+    assert restored == checkpoint

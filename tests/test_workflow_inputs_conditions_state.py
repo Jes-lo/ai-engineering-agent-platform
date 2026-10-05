@@ -11,6 +11,7 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowInput,
     WorkflowInputDefinition,
     WorkflowInputType,
+    WorkflowRunResult,
     WorkflowRunStatus,
     WorkflowStepDefinition,
     WorkflowStepStatus,
@@ -260,6 +261,7 @@ async def test_false_condition_skips_executor_and_records_state() -> None:
             ),
         ),
     )
+    assert isinstance(result, WorkflowRunResult)
 
     assert executor.calls == []
 

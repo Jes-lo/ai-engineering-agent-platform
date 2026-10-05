@@ -1,7 +1,7 @@
 """Controlled single-turn agent orchestration over LLM and tool boundaries."""
 
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import uuid4
@@ -14,6 +14,12 @@ from ai_engineering_agent_platform.contracts import (
     LLMToolCall,
     ToolDefinition,
     ToolInvocation,
+)
+from ai_engineering_agent_platform.services.agent_continuation import (
+    AgentContinuationConflictError,
+    AgentContinuationError,
+    AgentContinuationKind,
+    AgentContinuationStore,
 )
 from ai_engineering_agent_platform.services.tool_execution import (
     ControlledToolExecutionResult,
@@ -328,6 +334,7 @@ class ControlledAgentService:
         llm_provider: LLMProvider,
         registry: ToolRegistry,
         tool_execution: ToolExecutionService,
+        continuation_store: AgentContinuationStore | None = None,
         call_id_factory: (
             Callable[
                 [str, int],
@@ -340,6 +347,15 @@ class ControlledAgentService:
         self._llm_provider = llm_provider
         self._registry = registry
         self._tool_execution = tool_execution
+
+        if continuation_store is not None and not isinstance(
+            continuation_store,
+            AgentContinuationStore,
+        ):
+            raise ValueError("continuation_store must implement AgentContinuationStore")
+
+        self._continuation_store = continuation_store
+
         self._call_id_factory = (
             _default_call_id if call_id_factory is None else call_id_factory
         )
@@ -354,7 +370,34 @@ class ControlledAgentService:
         *,
         authorization: ToolExecutionAuthorization,
     ) -> AgentTurnResult:
-        """Run one LLM decision and execute or pause its bounded tool plan."""
+        """Run one standalone turn with service-owned continuation durability."""
+        return await self._start(
+            request,
+            authorization=authorization,
+            persist_pause=True,
+        )
+
+    async def _start_parent_owned(
+        self,
+        request: AgentTurnRequest,
+        *,
+        authorization: ToolExecutionAuthorization,
+    ) -> AgentTurnResult:
+        """Run one child turn whose parent owns any approval continuation."""
+        return await self._start(
+            request,
+            authorization=authorization,
+            persist_pause=False,
+        )
+
+    async def _start(
+        self,
+        request: AgentTurnRequest,
+        *,
+        authorization: ToolExecutionAuthorization,
+        persist_pause: bool,
+    ) -> AgentTurnResult:
+        """Run one turn with explicit approval-pause persistence ownership."""
         if not isinstance(
             request,
             AgentTurnRequest,
@@ -427,7 +470,8 @@ class ControlledAgentService:
                 pending_approval_call_ids=(missing_approvals),
             )
 
-            self._register_pending(pending)
+            if persist_pause:
+                await self._register_pending(pending)
 
             return pending
 
@@ -456,7 +500,7 @@ class ControlledAgentService:
 
         key = self._plan_key(pending.planned_steps)
 
-        issued_pending = self._pending_plans.get(key)
+        issued_pending = await self._load_pending(key)
 
         if issued_pending is None or issued_pending != pending:
             raise AgentResumeError(
@@ -477,19 +521,71 @@ class ControlledAgentService:
                 pending_approval_call_ids=(missing_approvals),
             )
 
-            self._pending_plans[key] = still_pending
+            await self._replace_pending(
+                key,
+                expected=issued_pending,
+                pending=still_pending,
+            )
 
             return still_pending
 
         # Consume the continuation before provider execution. If execution
         # fails partway through the batch, automatic replay is deliberately
         # prohibited because earlier tool side effects may already exist.
-        del self._pending_plans[key]
+        await self._consume_pending(
+            key,
+            expected=issued_pending,
+        )
 
         return await self._execute_plan(
             run_id=pending.run_id,
             response=pending.response,
             planned_steps=(pending.planned_steps),
+            authorization=authorization,
+        )
+
+    async def _resume_parent_owned(
+        self,
+        pending: AgentTurnResult,
+        *,
+        authorization: ToolExecutionAuthorization,
+        before_execute: Callable[[], Awaitable[None]],
+    ) -> AgentTurnResult:
+        """Resume a frozen child turn under its parent-owned replay gate."""
+        if not isinstance(
+            pending,
+            AgentTurnResult,
+        ):
+            raise AgentResumeError("pending must be an AgentTurnResult")
+
+        if pending.status is not AgentTurnStatus.APPROVAL_REQUIRED:
+            raise AgentResumeError("only an approval-required turn can be resumed")
+
+        if not callable(before_execute):
+            raise AgentResumeError("before_execute must be callable")
+
+        missing_approvals = self._preflight_plan(
+            pending.planned_steps,
+            authorization=authorization,
+        )
+
+        if missing_approvals:
+            return AgentTurnResult(
+                run_id=pending.run_id,
+                status=AgentTurnStatus.APPROVAL_REQUIRED,
+                response=pending.response,
+                planned_steps=pending.planned_steps,
+                pending_approval_call_ids=missing_approvals,
+            )
+
+        # The parent continuation is the only replay gate for a bounded loop.
+        # It must be consumed before provider side effects begin.
+        await before_execute()
+
+        return await self._execute_plan(
+            run_id=pending.run_id,
+            response=pending.response,
+            planned_steps=pending.planned_steps,
             authorization=authorization,
         )
 
@@ -648,17 +744,134 @@ class ControlledAgentService:
             executions=tuple(executions),
         )
 
-    def _register_pending(
+    @property
+    def continuation_store(
+        self,
+    ) -> AgentContinuationStore | None:
+        """Return the injected continuation persistence boundary."""
+        return self._continuation_store
+
+    async def _register_pending(
         self,
         pending: AgentTurnResult,
     ) -> None:
-        """Register one active in-memory continuation exactly once."""
+        """Register one exact service-issued turn continuation."""
         key = self._plan_key(pending.planned_steps)
 
-        if key in self._pending_plans:
-            raise AgentResumeError("pending plan identity is already active")
+        if self._continuation_store is None:
+            if key in self._pending_plans:
+                raise AgentResumeError("pending plan identity is already active")
 
-        self._pending_plans[key] = pending
+            self._pending_plans[key] = pending
+            return
+
+        try:
+            await self._continuation_store.create(
+                kind=AgentContinuationKind.TURN,
+                identity=key,
+                snapshot=pending,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentResumeError("pending plan identity is already active") from exc
+        except AgentContinuationError as exc:
+            raise AgentResumeError("durable pending plan registration failed") from exc
+
+    async def _load_pending(
+        self,
+        key: tuple[str, ...],
+    ) -> AgentTurnResult | None:
+        """Load one exact active turn continuation."""
+        if self._continuation_store is None:
+            return self._pending_plans.get(key)
+
+        try:
+            snapshot = await self._continuation_store.load(
+                kind=AgentContinuationKind.TURN,
+                identity=key,
+            )
+        except AgentContinuationError as exc:
+            raise AgentResumeError("durable pending plan lookup failed") from exc
+
+        if snapshot is None:
+            return None
+
+        if not isinstance(
+            snapshot,
+            AgentTurnResult,
+        ):
+            raise AgentResumeError("durable pending plan has invalid type")
+
+        if snapshot.status is not AgentTurnStatus.APPROVAL_REQUIRED:
+            raise AgentResumeError("durable pending plan has invalid status")
+
+        if self._plan_key(snapshot.planned_steps) != key:
+            raise AgentResumeError("durable pending plan identity mismatch")
+
+        return snapshot
+
+    async def _replace_pending(
+        self,
+        key: tuple[str, ...],
+        *,
+        expected: AgentTurnResult,
+        pending: AgentTurnResult,
+    ) -> None:
+        """Replace an active turn pause after fail-closed preflight."""
+        if self._continuation_store is None:
+            issued = self._pending_plans.get(key)
+
+            if issued is None or issued != expected:
+                raise AgentResumeError(
+                    "pending turn is not an active service-issued continuation"
+                )
+
+            self._pending_plans[key] = pending
+            return
+
+        try:
+            await self._continuation_store.replace(
+                kind=AgentContinuationKind.TURN,
+                identity=key,
+                expected=expected,
+                snapshot=pending,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentResumeError(
+                "pending turn is not an active service-issued continuation"
+            ) from exc
+        except AgentContinuationError as exc:
+            raise AgentResumeError("durable pending plan replacement failed") from exc
+
+    async def _consume_pending(
+        self,
+        key: tuple[str, ...],
+        *,
+        expected: AgentTurnResult,
+    ) -> None:
+        """Consume turn continuation before provider side effects begin."""
+        if self._continuation_store is None:
+            issued = self._pending_plans.get(key)
+
+            if issued is None or issued != expected:
+                raise AgentResumeError(
+                    "pending turn is not an active service-issued continuation"
+                )
+
+            del self._pending_plans[key]
+            return
+
+        try:
+            await self._continuation_store.consume(
+                kind=AgentContinuationKind.TURN,
+                identity=key,
+                expected=expected,
+            )
+        except AgentContinuationConflictError as exc:
+            raise AgentResumeError(
+                "pending turn is not an active service-issued continuation"
+            ) from exc
+        except AgentContinuationError as exc:
+            raise AgentResumeError("durable pending plan consumption failed") from exc
 
     @staticmethod
     def _plan_key(

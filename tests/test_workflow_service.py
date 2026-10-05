@@ -6,6 +6,7 @@ import pytest
 
 from ai_engineering_agent_platform.domain.workflow import (
     WorkflowDefinition,
+    WorkflowRunResult,
     WorkflowStepDefinition,
 )
 from ai_engineering_agent_platform.services.workflow import (
@@ -118,6 +119,7 @@ async def test_engine_executes_static_dag_in_declaration_order() -> None:
     )
 
     result = await engine.run(_definition())
+    assert isinstance(result, WorkflowRunResult)
 
     assert result.run_id == ("workflow-run:test")
 

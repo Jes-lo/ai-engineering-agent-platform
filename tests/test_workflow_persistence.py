@@ -216,7 +216,7 @@ def test_unknown_format_version_fails_closed() -> None:
 
     data = json.loads(codec.dumps(_running_checkpoint()))
 
-    data["format"] = 2
+    data["format"] = 3
 
     with pytest.raises(
         WorkflowSerializationError,

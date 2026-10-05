@@ -17,6 +17,7 @@ from ai_engineering_agent_platform.domain.workflow import (
     WorkflowDefinition,
     WorkflowEventType,
     WorkflowExecutionEvent,
+    WorkflowRunResult,
     WorkflowRunState,
     WorkflowRunStatus,
     WorkflowStepDefinition,
@@ -346,6 +347,7 @@ async def _exercise_engine_restart_and_resume() -> None:
             definition,
             run_id=run_id,
         )
+        assert isinstance(result, WorkflowRunResult)
 
         assert first_after_restart.calls == []
 

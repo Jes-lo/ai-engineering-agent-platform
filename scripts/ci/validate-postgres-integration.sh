@@ -244,6 +244,10 @@ uv run pytest \
   -W error \
   tests/integration/test_postgres_vector_live.py \
   tests/integration/test_postgres_workflow_persistence_live.py \
+  tests/integration/test_postgres_workflow_approval_live.py \
+  tests/integration/test_postgres_approval_live.py \
+  tests/integration/test_postgres_agent_continuation_live.py \
+  tests/integration/test_postgres_workflow_hitl_e2e_live.py \
   -v
 
 echo "PASS: live provider integration"
@@ -323,7 +327,7 @@ SQL
 
 echo "role|vector086|tables|collections|records|revision=$FINAL_STATE"
 
-[[ "$FINAL_STATE" == "1|1|3|0|0|$EXPECTED_REVISION" ]] || {
+[[ "$FINAL_STATE" == "1|1|5|0|0|$EXPECTED_REVISION" ]] || {
   echo "FAIL: integration database final state is unexpected"
   exit 1
 }
