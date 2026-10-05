@@ -90,9 +90,12 @@ incomplete, or mismatched tool-result sequences. Tool output cannot grant
 authorization for a later action.
 
 Approval-required execution pauses before provider side effects. Resume uses
-the exact service-issued plan without regenerating the model decision.
-Continuation state and replay protection remain process-local and in-memory;
-they are not durable approval workflow state or authenticated human identity.
+the exact frozen plan without regenerating the model decision. Project-owned
+continuation persistence can retain active and consumed continuation state
+across process loss, while replay and identity checks remain fail-closed before
+resumed provider execution. Authenticated human identity and approval provenance
+remain owned by the separate approval control plane rather than by continuation
+data or model output.
 
 Sequential multi-tool execution is not atomic. Earlier successful side effects
 are not rolled back if a later provider execution fails, and automatic retries
