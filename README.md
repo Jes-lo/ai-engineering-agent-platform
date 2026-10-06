@@ -4,6 +4,11 @@ A self-hosted AI engineering and agent platform built as a portfolio
 project to demonstrate secure, observable, testable, and maintainable AI
 platform engineering practices.
 
+**Core technologies:** Python 3.13 · FastAPI · PostgreSQL 18 · pgvector ·
+Psycopg · Alembic · Ollama · MCP Python SDK · OpenTelemetry API ·
+Docker Compose · GitHub Actions · uv · Ruff · mypy · pytest · Gitleaks ·
+CycloneDX
+
 ## Status
 
 Portfolio release baseline complete for the current scoped implementation.
@@ -99,6 +104,27 @@ contains immutable `LLMToolCall` proposals and uses
 `FinishReason.TOOL_CALLS` when proposals are present. A proposal is
 untrusted model output: it is not a `ToolInvocation`, does not carry platform
 execution authority, and cannot execute a tool by itself.
+
+## Golden Demo
+
+The repository includes a deterministic golden demo for the current platform
+baseline:
+
+    ./scripts/demo/run-golden-demo.sh
+
+The demo exercises grounded retrieval with platform-owned citation provenance
+and deterministic runtime guardrails, then invokes the isolated live
+PostgreSQL integration gate covering durable workflow state, authenticated
+human-in-the-loop approval, durable agent continuations, controlled tool
+execution, restart/resume, and replay boundaries.
+
+Deterministic synthetic AI providers are used for the portfolio-facing RAG and
+guardrail stages so platform behavior can be demonstrated without depending on
+model randomness or downloaded model weights. The repository's real Ollama
+adapters remain independently available and tested.
+
+See [Golden Demo](examples/README.md) for requirements, demonstrated security
+boundaries, and explicit non-claims.
 
 ## Controlled Tool Execution Foundation
 
@@ -462,6 +488,69 @@ Supply-chain reports are generated during CI and retained as workflow
 artifacts for a limited period.
 
 ## Architecture
+
+The diagram below summarizes implemented application and persistence boundaries
+in the current portfolio release. It is a logical architecture view rather
+than a production deployment topology and does not imply that every application
+service is exposed through a public HTTP API.
+
+```mermaid
+flowchart LR
+    Caller["Application / trusted caller"]
+
+    subgraph Platform["AI Engineering & Agent Platform"]
+        FastAPI["FastAPI host"]
+        MCP["Inbound MCP / Streamable HTTP"]
+        Workflow["WorkflowEngine"]
+        RAG["RAGService"]
+        Agent["BoundedAgentLoopService"]
+        Guardrails["GuardrailService"]
+        Approval["ApprovalService"]
+        ToolExecution["ToolExecutionService"]
+        Providers["LLM / Embedding Provider Adapters"]
+        VectorStore["PostgreSQL + pgvector Vector Store"]
+        DurableState["PostgreSQL Durable State"]
+        Telemetry["Low-content OpenTelemetry API Projections"]
+    end
+
+    Ollama["Ollama Runtime"]
+    Tools["Registered Tool Providers"]
+
+    Caller --> Workflow
+    Caller --> RAG
+    Caller --> Agent
+
+    FastAPI --> MCP
+    MCP --> ToolExecution
+
+    Workflow --> RAG
+    Workflow --> Agent
+    Workflow --> ToolExecution
+    Workflow --> DurableState
+    Workflow --> Telemetry
+
+    RAG --> Providers
+    RAG --> VectorStore
+    RAG -. stage checks .-> Guardrails
+
+    Agent --> Providers
+    Agent --> Approval
+    Agent --> ToolExecution
+    Agent --> DurableState
+    Agent -. stage checks .-> Guardrails
+
+    Approval --> DurableState
+    Guardrails --> Telemetry
+
+    Providers --> Ollama
+    ToolExecution --> Tools
+```
+
+The model/provider boundary never becomes an authorization boundary:
+model-proposed tool calls remain inert until platform controls accept them.
+`ToolExecutionService` remains the final controlled execution authority, while
+`ApprovalService` owns durable approval decisions. Retrieved content, tool
+results, and model output remain untrusted data.
 
 Architecture decisions and supporting documentation are maintained under:
 
